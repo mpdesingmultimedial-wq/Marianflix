@@ -1,3 +1,0 @@
--keep class com.marian.marianflix.magis.** { *; }
--keepattributes *Annotation*, InnerClasses, Signature
--dontwarn kotlinx.serialization.**

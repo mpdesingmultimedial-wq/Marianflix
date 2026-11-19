@@ -1,0 +1,40 @@
+{
+  "updated": "2026-11-18T15:36:08.010Z",
+  "seeds": [
+    {
+      "sn": "399a9da06fc1525e71568eac8053512c",
+      "userId": "993444186",
+      "userToken": "15ed7bf6-a05e-4883-b65b-2bb0e441dc1b"
+    },
+    {
+      "sn": "275d9cfe426e7880ea5e91ef75ea6256",
+      "userId": "993446004",
+      "userToken": "24b628d0-29af-4134-8f38-536395db5ef8"
+    },
+    {
+      "sn": "16ecfc9c686c19305b2a3a18bbd761ed",
+      "userId": "993446208",
+      "userToken": "fd4dafcf-0dbf-453e-9056-b1ebb16a4c6e"
+    },
+    {
+      "sn": "499b9cdead38dfd45437afdff1c9d501",
+      "userId": "993446278",
+      "userToken": "19bb73bb-a931-4406-b495-94eae18fb9a4"
+    },
+    {
+      "sn": "b594df63822e977e2dc1d1d00fa22729",
+      "userId": "993446326",
+      "userToken": "c46f72f3-44a1-48f1-a0c3-d94122e06f24"
+    },
+    {
+      "sn": "41659592c8f36f3ed5ce65586f2485e8",
+      "userId": "993446582",
+      "userToken": "af21611b-85cc-41a4-b156-a03ae646b6b4"
+    },
+    {
+      "sn": "d2d5de5aa1671150a48c7b7778ad30ec",
+      "userId": "993446678",
+      "userToken": "180b3436-9562-4768-ab8a-3fb91e6079b5"
+    }
+  ]
+}

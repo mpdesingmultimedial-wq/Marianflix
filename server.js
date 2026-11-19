@@ -334,6 +334,42 @@ function fetchShelve(columnId, pageNum, pageSize, defaultKind, rowLabel) {
   });
 }
 
+// Load Custom VOD M3U backup list (shared across Web & Roku when portal VOD is paused)
+const CUSTOM_VOD_FILE = path.join(__dirname, "custom_vod.json");
+const PROXY_CONFIG_FILE = path.join(__dirname, "proxy_config.json");
+let customVodState = { m3uUrl: "", items: [] };
+try {
+  const saved = JSON.parse(fs.readFileSync(CUSTOM_VOD_FILE, "utf8"));
+  if (saved && Array.isArray(saved.items)) customVodState = saved;
+} catch (_) {}
+try {
+  const savedProxy = JSON.parse(fs.readFileSync(PROXY_CONFIG_FILE, "utf8"));
+  if (savedProxy && savedProxy.proxyUrl) magis.setManualProxy(savedProxy.proxyUrl);
+} catch (_) {}
+
+function saveProxyConfig(proxyUrl) {
+  try { fs.writeFileSync(PROXY_CONFIG_FILE, JSON.stringify({ proxyUrl: String(proxyUrl || "") }, null, 2)); } catch (_) {}
+}
+
+function saveCustomVod() {
+  try { fs.writeFileSync(CUSTOM_VOD_FILE, JSON.stringify(customVodState, null, 2)); } catch (_) {}
+}
+
+function readJsonBody(req, cb) {
+  let body = "";
+  req.on("data", chunk => { body += chunk; if (body.length > 512000) req.destroy(); });
+  req.on("end", () => {
+    try { cb(null, JSON.parse(body || "{}")); } catch (e) { cb(e); }
+  });
+}
+
+// Auto-refresh seeds in background every 15 min if portal session is not active
+setInterval(() => {
+  if (!magis.session || !magis.session.ready) {
+    try { magis.forceRefreshSeeds(() => {}); } catch (_) {}
+  }
+}, 15 * 60 * 1000);
+
 const server = http.createServer((req, res) => {
   const parsed = url.parse(req.url, true);
   const pathname = parsed.pathname || "/";
@@ -528,10 +564,144 @@ try {
     });
   }
 
-  // API: Resolve VOD (Movie / Series Episode) - probe TS for instant HLS seeking & independent Audio tracks
+  // API: Session Status & Resilience Controls (shared by Web & Roku)
+  if (pathname === "/api/session-status") {
+    const st = magis.seedStatus ? magis.seedStatus() : {};
+    const lastErr = (magis.session && magis.session.lastError) || "";
+    const hasFatalErr = /portal100024|aaa100027|aaa100028|socket hang up|timeout|sin semilla|rechaz/i.test(lastErr);
+    const isActuallyReady = !!(magis.session && magis.session.ready && !hasFatalErr);
+    return sendJson(res, 200, {
+      ready: isActuallyReady,
+      usesSeed: !!(magis.session && magis.session.usesSeed),
+      lastError: lastErr,
+      seedStatus: st,
+      manualProxyUrl: magis.getManualProxy ? magis.getManualProxy() : "",
+      customM3uUrl: customVodState.m3uUrl || "",
+      customVodCount: (customVodState.items || []).length
+    });
+  }
+
+  // API: Configure Manual HTTP Proxy (standard user-provided proxy for Web & Roku)
+  if (pathname === "/api/manual-proxy" && req.method === "POST") {
+    return readJsonBody(req, (err, data) => {
+      if (err) return sendJson(res, 400, { error: "JSON inválido" });
+      const proxyUrl = String(data.proxyUrl || "").trim();
+      magis.setManualProxy(proxyUrl);
+      saveProxyConfig(proxyUrl);
+      sendJson(res, 200, { ok: true, manualProxyUrl: proxyUrl });
+    });
+  }
+
+  // API: Test Manual HTTP Proxy connectivity (CONNECT / TCP latency check)
+  if (pathname === "/api/test-proxy" && req.method === "POST") {
+    return readJsonBody(req, (err, data) => {
+      if (err) return sendJson(res, 400, { error: "JSON inválido" });
+      const raw = String(data.proxyUrl || "").trim();
+      if (!raw) return sendJson(res, 400, { ok: false, error: "Ingresá una URL de proxy primero" });
+      let p;
+      try { p = url.parse(raw.includes("://") ? raw : ("http://" + raw)); } catch (_) {
+        return sendJson(res, 400, { ok: false, error: "Formato de proxy inválido" });
+      }
+      const pHost = p.hostname;
+      const pPort = parseInt(p.port, 10) || 8080;
+      const t0 = Date.now();
+      let done = false;
+      const finish = (ok, msg) => {
+        if (done) return;
+        done = true;
+        sendJson(res, 200, { ok, ms: Date.now() - t0, message: msg });
+      };
+      const hdrs = { Host: "www.google.com:443" };
+      if (p.auth) hdrs["Proxy-Authorization"] = "Basic " + Buffer.from(p.auth).toString("base64");
+      const reqTest = http.request({ host: pHost, port: pPort, method: "CONNECT", path: "www.google.com:443", headers: hdrs });
+      reqTest.setTimeout(6000, () => { try { reqTest.destroy(); } catch (_) {} finish(false, "Timeout (6s) — el proxy no responde"); });
+      reqTest.on("error", (e) => finish(false, "Error de red: " + e.message));
+      reqTest.on("connect", (pRes, sock) => {
+        try { sock.destroy(); } catch (_) {}
+        if (pRes.statusCode === 200) finish(true, `Proxy conectado correctamente (${Date.now() - t0} ms)`);
+        else finish(false, `El proxy respondió HTTP ${pRes.statusCode}`);
+      });
+      reqTest.end();
+    });
+  }
+
+  // API: Force Refresh Seeds now (GET or POST so Roku & Web can both trigger it)
+  if (pathname === "/api/refresh-seeds") {
+    return magis.forceRefreshSeeds((err) => {
+      sendJson(res, 200, {
+        ok: !err && !!(magis.session && magis.session.ready),
+        ready: !!(magis.session && magis.session.ready),
+        error: err ? err.message : "",
+        seedStatus: magis.seedStatus ? magis.seedStatus() : {}
+      });
+    });
+  }
+
+  // API: Set Manual Session (user-provided sn, userId, userToken)
+  if (pathname === "/api/manual-session" && req.method === "POST") {
+    return readJsonBody(req, (err, data) => {
+      if (err) return sendJson(res, 400, { error: "JSON inválido" });
+      const ok = magis.setManualSession(data.sn, data.userId, data.userToken);
+      if (!ok) return sendJson(res, 400, { error: "Completá sn, userId y userToken" });
+      sendJson(res, 200, { ok: true, ready: true });
+    });
+  }
+
+  // API: Custom VOD M3U Playlist (Películas / Series propias para Web y Roku)
+  if (pathname === "/api/custom-vod") {
+    if (req.method === "POST") {
+      return readJsonBody(req, (err, data) => {
+        if (err) return sendJson(res, 400, { error: "JSON inválido" });
+        const m3uUrl = String(data.m3uUrl || "").trim();
+        if (!m3uUrl) {
+          customVodState = { m3uUrl: "", items: [] };
+          saveCustomVod();
+          return sendJson(res, 200, { ok: true, items: [], m3uUrl: "" });
+        }
+        return magis.fetchM3u(m3uUrl, (fErr, raw) => {
+          if (fErr || !raw) return sendJson(res, 400, { error: (fErr && fErr.message) || "No se pudo descargar la lista M3U" });
+          const parsedList = magis.parseM3u(raw) || [];
+          const items = parsedList.filter(x => x && x.streamUrl).slice(0, 1500).map((x, idx) => ({
+            id: "custom_" + (idx + 1),
+            title: String(x.title || x.name || ("Video " + (idx + 1))),
+            kind: /s\d+e\d+|temporada|episodio|serie|cap/i.test(String(x.title || x.category || "")) ? "series" : "movie",
+            year: "2026",
+            score: "8.5",
+            genres: [String(x.category || "Lista Propia")],
+            synopsis: "Título cargado desde tu lista VOD M3U propia.",
+            poster: String(x.poster || x.logo || ""),
+            backdrop: String(x.poster || x.logo || ""),
+            streamUrl: String(x.streamUrl)
+          }));
+          customVodState = { m3uUrl, items };
+          saveCustomVod();
+          sendJson(res, 200, { ok: true, m3uUrl, count: items.length, items });
+        });
+      });
+    }
+    return sendJson(res, 200, { m3uUrl: customVodState.m3uUrl || "", items: customVodState.items || [] });
+  }
+
+  // API: Resolve VOD (Movie / Series Episode) - supports Custom VOD M3U + Portal TS/HLS
   if (pathname === "/api/resolve-vod") {
     const id = parsed.query.id || "";
     const seriesId = parsed.query.seriesId || "";
+    if (String(id).startsWith("custom_")) {
+      const found = (customVodState.items || []).find(x => x.id === id);
+      if (!found) return sendJson(res, 404, { error: "Título no encontrado en tu lista propia" });
+      const u = found.streamUrl;
+      const isHls = /\.m3u8(\?|$)/i.test(u);
+      const isMp4 = /\.(mp4|webm|mkv)(\?|$)/i.test(u);
+      return sendJson(res, 200, {
+        title: found.title,
+        format: isHls ? "hls" : (isMp4 ? "mp4" : "ts"),
+        hlsUrl: isHls ? `/api/proxy?url=${encodeURIComponent(u)}` : "",
+        streamUrl: `/api/proxy?url=${encodeURIComponent(u)}`,
+        duration: 0,
+        audioTracks: [{ index: 0, lang: "es" }],
+        subtitles: []
+      });
+    }
     return magis.resolve(id, seriesId, { hevc: false }, async (err, pb) => {
       if (err) return sendJson(res, 500, { error: err.message });
       const ext = pb.url.toLowerCase().endsWith(".mp4") ? "mp4" : "ts";

@@ -2,11 +2,13 @@
 var crypto = require("crypto"),
   https = require("https"),
   http = require("http"),
+  tls = require("tls"),
   fs = require("fs"),
   url = require("url"),
   path = require("path"),
   dnsx = require("./dnsx"),
   upstream = require("./upstream"),
+  manualProxyUrl = "",
   KEY_HEX = "e7af1ed7de1ffddd7bd3fe37ebdffde9ef3fe1ae39edfeb8",
   HOSTS = [
     "mptec.dhkrxuzcy.com",
@@ -311,6 +313,63 @@ function post(e, r, t) {
       a < s.length ||
       (o <= 0 && c(l || new Error(e + ": el portal no respondió")));
   }
+  function openViaManualProxy(targetHost, targetPort, isHttp, reqOpts, onReqReady, onErr) {
+    var p;
+    try {
+      var raw = manualProxyUrl.indexOf("://") >= 0 ? manualProxyUrl : ("http://" + manualProxyUrl);
+      p = url.parse(raw);
+    } catch (pe) {
+      return onErr(new Error("Proxy inválido: " + manualProxyUrl));
+    }
+    var pHost = p.hostname;
+    var pPort = parseInt(p.port, 10) || 8080;
+    if (!pHost) return onErr(new Error("Proxy sin host válido"));
+    var authHeader = p.auth ? ("Basic " + Buffer.from(p.auth).toString("base64")) : "";
+
+    // Standard HTTP proxy request for plain HTTP (proxies reject CONNECT :80)
+    if (isHttp) {
+      var hHeaders = Object.assign({}, reqOpts.headers, { Host: targetHost });
+      if (authHeader) hHeaders["Proxy-Authorization"] = authHeader;
+      var httpOpts = Object.assign({}, reqOpts, {
+        hostname: pHost,
+        host: pHost,
+        port: pPort,
+        path: "http://" + targetHost + reqOpts.path,
+        agent: false,
+        headers: hHeaders,
+      });
+      return onReqReady(httpOpts);
+    }
+
+    var cHeaders = { Host: targetHost + ":" + targetPort };
+    if (authHeader) cHeaders["Proxy-Authorization"] = authHeader;
+    var cReq = http.request({
+      host: pHost,
+      port: pPort,
+      method: "CONNECT",
+      path: targetHost + ":" + targetPort,
+      headers: cHeaders,
+    });
+    cReq.setTimeout(8000, function () {
+      try { cReq.destroy(); } catch (_) {}
+      onErr(new Error("Timeout conectando al proxy " + pHost + ":" + pPort));
+    });
+    cReq.on("error", onErr);
+    cReq.on("connect", function (pRes, socket) {
+      if (pRes.statusCode !== 200) {
+        try { socket.destroy(); } catch (_) {}
+        return onErr(new Error("Proxy rechazó CONNECT (HTTP " + pRes.statusCode + ")"));
+      }
+      var nextOpts = Object.assign({}, reqOpts, {
+        agent: false,
+        createConnection: function () {
+          return tls.connect({ socket: socket, servername: targetHost, rejectUnauthorized: false });
+        },
+      });
+      onReqReady(nextOpts);
+    });
+    cReq.end();
+  }
   function m(r, t, s) {
     var a = "http" === t,
       u = {
@@ -335,14 +394,13 @@ function post(e, r, t) {
           "Content-Length": Buffer.byteLength(n),
         },
       };
-    dnsx.prepare(u, function (t, u) {
+    function dispatchReq(reqOpts) {
       if (!i) {
-        if (t) return ((l = t), o--, void f());
         var m = !1,
           p = !1,
           v = null;
         try {
-          v = (a ? http : https).request(u, function (t) {
+          v = (a ? http : https).request(reqOpts, function (t) {
             p = !0;
             var n = [];
             (t.on("data", function (e) {
@@ -493,17 +551,36 @@ function post(e, r, t) {
           } catch (e) {}
         (o--, f());
       }
-    });
+    }
+    // Match APK (MagisSession.kt): only v8/active uses the manual HTTP proxy;
+    // all other endpoints (snToken, catalog, detail, startPlayVOD) connect directly!
+    if (manualProxyUrl && e === "v8/active") {
+      openViaManualProxy(r, a ? 80 : 443, a, u, dispatchReq, function (err) {
+        if (!i) { l = err; o--; f(); }
+      });
+    } else {
+      dnsx.prepare(u, function (t, prepared) {
+        if (i) return;
+        if (t) return ((l = t), o--, void f());
+        dispatchReq(prepared);
+      });
+    }
   }
   function p() {
     if (!(i || a >= s.length)) {
-      var e = s[a++],
+      var hName = s[a++],
         r = !1,
         t = null;
-      ((o += 2), (t = setTimeout(n, HTTP_FALLBACK_DELAY)), m(e, "https", n));
+      if (manualProxyUrl && e === "v8/active") {
+        // Match APK MagisTransport.postViaProxy: send plain HTTP via proxy immediately
+        o += 1;
+        m(hName, "http");
+      } else {
+        ((o += 2), (t = setTimeout(n, HTTP_FALLBACK_DELAY)), m(hName, "https", n));
+      }
     }
     function n() {
-      r || i || ((r = !0), t && (clearTimeout(t), (t = null)), m(e, "http"));
+      r || i || ((r = !0), t && (clearTimeout(t), (t = null)), m(hName, "http"));
     }
   }
   (p(),
@@ -2298,6 +2375,46 @@ module.exports = {
   post: post,
   ensureSession: ensureSession,
   session: session,
+  forceRefreshSeeds: function (cb) {
+    deadSeeds = {};
+    seedsAt = 0;
+    lastSeedFailure = 0;
+    session.ready = false;
+    refreshSeeds(function (err) {
+      if (err) return cb && cb(err);
+      ensureSession(function (sErr) {
+        cb && cb(sErr || null, session);
+      });
+    });
+  },
+  setManualSession: function (sn, userId, userToken) {
+    var cleanSn = trim(sn).toLowerCase();
+    var cleanUid = trim(userId);
+    var cleanTok = trim(userToken);
+    if (!cleanSn || !cleanUid || !cleanTok) return false;
+    deadSeeds = {};
+    session.sn = cleanSn;
+    session.userId = cleanUid;
+    session.userToken = cleanTok;
+    session.snToken = "";
+    session.ready = true;
+    session.usesSeed = false;
+    session.seed = null;
+    session.at = Date.now();
+    session.lastError = "";
+    saveStoredSession();
+    return true;
+  },
+  setManualProxy: function (proxyUrl) {
+    manualProxyUrl = trim(proxyUrl || "");
+    session.ready = false;
+    session.lastError = "";
+    sessionActTries = 0;
+    return manualProxyUrl;
+  },
+  getManualProxy: function () {
+    return manualProxyUrl;
+  },
   seedStatus: function () {
     var e,
       r = 0;

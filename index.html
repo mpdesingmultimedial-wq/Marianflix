@@ -1239,6 +1239,9 @@
       sortBy: "year",
       searchQuery: "",
       searchResults: [],
+      customVod: [],
+      customM3uUrl: "",
+      sessionStatus: { ready: false, lastError: "" },
       activeDetail: null
     };
 
@@ -1410,6 +1413,22 @@
           render();
         }
       }).catch(() => {});
+
+      apiGet("/api/session-status", 4000).then(st => {
+        if (st) {
+          state.sessionStatus = st;
+          if (st.customM3uUrl) state.customM3uUrl = st.customM3uUrl;
+          if (state.section === "settings") render();
+        }
+      }).catch(() => {});
+
+      apiGet("/api/custom-vod", 4000).then(cv => {
+        if (cv && Array.isArray(cv.items)) {
+          state.customVod = cv.items;
+          state.customM3uUrl = cv.m3uUrl || "";
+          render();
+        }
+      }).catch(() => {});
     }
 
     setInterval(() => {
@@ -1557,6 +1576,9 @@
         .slice(0, 10);
 
       const shelves = [];
+      if (state.customVod && state.customVod.length) {
+        shelves.push(["📂 Mi Lista VOD Propia (Respaldo Activo)", state.customVod.slice(0, 30)]);
+      }
       if (thisMonthItems.length) {
         shelves.push(["🔥 Estrenos del mes", thisMonthItems.slice(0, 26)]);
       }
@@ -2213,20 +2235,162 @@
       render();
     }
 
+    async function refreshVodSeedsNow() {
+      const btn = document.getElementById("btnRefreshSeeds");
+      if (btn) btn.textContent = "Actualizando sesiones...";
+      try {
+        const res = await fetch(API_BASE + "/api/refresh-seeds", { method: "POST" });
+        const data = await res.json();
+        const st = await apiGet("/api/session-status", 4000).catch(() => null);
+        if (st) state.sessionStatus = st;
+        alert(data.ready ? "Sesión VOD renovada y activa en Web y Roku." : "Pool actualizado (aún esperando nuevas sesiones válidas del portal).");
+      } catch (e) {
+        alert("No se pudo conectar al servidor local.");
+      }
+      render();
+    }
+
+    async function saveCustomVodM3u() {
+      const inp = document.getElementById("inpCustomM3u");
+      const m3uUrl = inp ? inp.value.trim() : "";
+      try {
+        const res = await fetch(API_BASE + "/api/custom-vod", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ m3uUrl })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Error al cargar M3U");
+        state.customVod = data.items || [];
+        state.customM3uUrl = data.m3uUrl || "";
+        alert(m3uUrl ? `Lista VOD cargada: ${state.customVod.length} títulos listos en Web y Roku.` : "Lista VOD propia limpiada.");
+        render();
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    }
+
+    async function testManualProxyUrl() {
+      const inp = document.getElementById("inpManualProxy");
+      const btn = document.getElementById("btnTestProxy");
+      const proxyUrl = inp ? inp.value.trim() : "";
+      if (!proxyUrl) return alert("Ingresá primero un proxy (ej: http://host:puerto).");
+      if (btn) btn.textContent = "Probando...";
+      try {
+        const res = await fetch(API_BASE + "/api/test-proxy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ proxyUrl })
+        });
+        const data = await res.json();
+        alert(data.ok ? ("✓ " + data.message) : ("✗ " + (data.message || data.error || "Proxy sin respuesta")));
+      } catch (e) {
+        alert("✗ Error al probar proxy: " + e.message);
+      }
+      if (btn) btn.textContent = "Probar Proxy";
+    }
+
+    async function saveManualProxyUrl(clearIt) {
+      const inp = document.getElementById("inpManualProxy");
+      const proxyUrl = clearIt ? "" : (inp ? inp.value.trim() : "");
+      try {
+        const res = await fetch(API_BASE + "/api/manual-proxy", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ proxyUrl })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Error al guardar proxy");
+        state.sessionStatus = Object.assign({}, state.sessionStatus, { manualProxyUrl: data.manualProxyUrl || "" });
+        alert(proxyUrl ? `Proxy manual guardado (${proxyUrl}) para Web y Roku.` : "Proxy manual desactivado (conexión directa).");
+        render();
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    }
+
+    async function saveManualVodSession() {
+      const sn = (document.getElementById("inpManualSn") || {}).value || "";
+      const userId = (document.getElementById("inpManualUid") || {}).value || "";
+      const userToken = (document.getElementById("inpManualTok") || {}).value || "";
+      try {
+        const res = await fetch(API_BASE + "/api/manual-session", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sn: sn.trim(), userId: userId.trim(), userToken: userToken.trim() })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Datos incompletos");
+        state.sessionStatus = { ready: true, lastError: "" };
+        alert("Sesión VOD activada para Web y Roku.");
+        initCatalog();
+      } catch (e) {
+        alert("Error: " + e.message);
+      }
+    }
+
     function renderSettings() {
       const favCount = getFavorites().length;
       const liveFavCount = getLiveFavs().length;
       const progCount = Object.keys(getProgressMap()).length;
+      const st = state.sessionStatus || {};
+      const vodBadge = st.ready
+        ? `<span style="color:#46d369;font-weight:800;">● Sesión VOD Activa</span>`
+        : `<span style="color:#ffd54f;font-weight:800;">⚠ Portal VOD sin sesión activa${st.lastError ? " (" + escapeHtml(st.lastError) + ")" : ""}</span>`;
       return `
-        <div class="browser-page" style="max-width:780px;">
+        <div class="browser-page" style="max-width:820px;">
           <div class="page-header">
             <h1 class="page-title">Ajustes</h1>
           </div>
           <div style="display:flex;flex-direction:column;gap:14px;">
-            <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:6px;">
-              <div style="font-size:16px;font-weight:800;color:#fff;">Estado del Servicio • Marianflix Web</div>
-              <div style="font-size:13px;color:#46d369;font-weight:700;">● Conectado • Catálogo 2026 + TV en Vivo Fusión (Mariantv_plus + Portal)</div>
-              <div style="font-size:12px;color:#b8b8c8;">Películas cargadas: ${state.movies.length} • Series cargadas: ${state.series.length} • Canales TV: ${state.liveChannels.length}</div>
+            <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:8px;">
+              <div style="font-size:16px;font-weight:800;color:#fff;">Estado del Servicio • Marianflix Web y Roku</div>
+              <div style="font-size:13px;">${vodBadge}</div>
+              <div style="font-size:12px;color:#b8b8c8;">Películas: ${state.movies.length} • Series: ${state.series.length} • TV en Vivo: ${state.liveChannels.length} • Lista VOD Propia: ${state.customVod.length}</div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">
+                <button id="btnRefreshSeeds" class="pill active" onclick="refreshVodSeedsNow()">🔄 Actualizar sesiones VOD ahora</button>
+              </div>
+            </div>
+
+            <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
+              <div style="font-size:16px;font-weight:800;color:#fff;">📂 Respaldo VOD Propio (Lista M3U para Web y Roku)</div>
+              <div style="font-size:12px;color:#b8b8c8;">Pegá una URL de lista M3U de películas o series para reproducir siempre en Web y Roku aunque el portal principal esté pausado:</div>
+              <input id="inpCustomM3u" type="text" class="search-input" placeholder="https://ejemplo.com/peliculas.m3u" value="${escapeHtml(state.customM3uUrl || "")}" />
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="pill active" onclick="saveCustomVodM3u()">Guardar y cargar lista M3U</button>
+              </div>
+            </div>
+
+            <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
+              <div style="font-size:16px;font-weight:800;color:#fff;">🌐 Proxy HTTP Manual (Opcional • Web y Roku)</div>
+              <div style="font-size:12px;color:#b8b8c8;">
+                Estado actual: <strong style="color:${st.manualProxyUrl ? '#00e5b4' : '#b8b8c8'};">${st.manualProxyUrl ? escapeHtml(st.manualProxyUrl) : "Conexión directa (sin proxy)"}</strong>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px;color:#b8b8c8;">
+                <span>Opción sugerida:</span>
+                <button type="button" class="pill" style="font-size:11px;padding:4px 10px;" onclick="document.getElementById('inpManualProxy').value='http://customer-resi_33f1dcad:Marianflix2026+@pr.oxylabs.io:7777'">
+                  Usar http://customer-resi_33f1dcad:Marianflix2026+@pr.oxylabs.io:7777
+                </button>
+              </div>
+              <input id="inpManualProxy" type="text" class="search-input" placeholder="http://host:puerto o http://usuario:clave@host:puerto" value="${escapeHtml(st.manualProxyUrl || "")}" />
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="pill active" onclick="saveManualProxyUrl(false)">Guardar Proxy</button>
+                <button id="btnTestProxy" class="pill" onclick="testManualProxyUrl()">Probar Proxy</button>
+                <button class="pill" onclick="saveManualProxyUrl(true)">Desactivar Proxy</button>
+              </div>
+            </div>
+
+            <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
+              <div style="font-size:16px;font-weight:800;color:#fff;">🔑 Sesión VOD Manual (Opcional • Web y Roku)</div>
+              <div style="font-size:12px;color:#b8b8c8;">Si tenés una sesión activa propia, pegá sus datos acá para activar Películas y Series al instante en Web y Roku:</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">
+                <input id="inpManualSn" type="text" class="search-input" placeholder="sn" />
+                <input id="inpManualUid" type="text" class="search-input" placeholder="userId" />
+                <input id="inpManualTok" type="text" class="search-input" placeholder="userToken" />
+              </div>
+              <div>
+                <button class="pill" onclick="saveManualVodSession()">Activar sesión manual</button>
+              </div>
             </div>
 
             <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
@@ -2291,7 +2455,7 @@
 
     function findItemById(id) {
       const clean = String(id).split(":")[0];
-      return [...state.featured, ...state.movies, ...state.series, ...state.searchResults, ...getFavorites()]
+      return [...state.customVod, ...state.featured, ...state.movies, ...state.series, ...state.searchResults, ...getFavorites()]
         .find(x => x && x.id === clean) || null;
     }
 
@@ -2737,7 +2901,9 @@
       activePlayer.selectedAudioIdx = 0;
 
       try {
-        const pb = await apiGet(`/api/resolve-vod?id=${encodeURIComponent(contentId)}&seriesId=${encodeURIComponent(seriesId || "")}`);
+        showSeekToast("⏳ Conectando stream VOD...");
+        const pb = await apiGet(`/api/resolve-vod?id=${encodeURIComponent(contentId)}&seriesId=${encodeURIComponent(seriesId || "")}`, 20000);
+        if (pb && pb.error) throw new Error(pb.error);
         activePlayer.subtitles = pb.subtitles || [];
         activePlayer.audioTracks = pb.audioTracks || [{ index: 0, lang: "es" }];
         activePlayer.hlsUrl = pb.hlsUrl || "";
@@ -2758,7 +2924,14 @@
           }
         }, 3000);
       } catch (e) {
-        document.getElementById("playerTitle").textContent = "Iniciá Iniciar_Marianflix_Web.bat para reproducir el stream del portal";
+        const msg = (e && e.message) ? e.message : "Error de conexión";
+        document.getElementById("playerTitle").textContent = "Sin sesión VOD activa (" + msg + ")";
+        const el = document.getElementById("nfToast");
+        if (el) {
+          clearTimeout(el._t);
+          el.textContent = "⚠ No se pudo iniciar: sesión VOD inactiva o proxy sin respuesta. Revisá Ajustes.";
+          el.style.display = "block";
+        }
       }
     }
 

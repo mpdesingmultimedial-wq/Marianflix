@@ -445,51 +445,65 @@ try {
   }
 } catch (_) {}
 
-  // API: Live Categories (merged Mariantv_plus + Marianflix Portal)
+  // API: Live Categories (all Mariantv_plus categories + Marianflix Portal categories, 3.5s timeout so it NEVER hangs!)
   if (pathname === "/api/live-categories") {
-    return magis.getLiveCategories((err, cats) => {
-      const merged = [
-        { id: "__ALL_MERGED__", name: "Todos (Fusión)" },
-        { id: "__ARGENTINA__", name: "Argentina (TV+)" },
-        { id: "__MARIANTV__", name: "MarianTV+ (Directo)" }
-      ];
+    let sent = false;
+    const baseMerged = [
+      { id: "__ALL_MERGED__", name: "Todos (Fusión)" },
+      { id: "__ARGENTINA__", name: "Argentina" },
+      { id: "__LOCAL_CAT__:Deportes", name: "Deportes" },
+      { id: "__LOCAL_CAT__:Cine y Series", name: "Cine y Series" },
+      { id: "__LOCAL_CAT__:Noticias", name: "Noticias" },
+      { id: "__LOCAL_CAT__:Infantil", name: "Infantil" },
+      { id: "__LOCAL_CAT__:Entretenimiento", name: "Entretenimiento" },
+      { id: "__LOCAL_CAT__:Música", name: "Música" },
+      { id: "__LOCAL_CAT__:Cultura y Ciencia", name: "Cultura y Ciencia" },
+      { id: "__LOCAL_CAT__:TV Abierta", name: "TV Abierta" },
+      { id: "__MARIANTV__", name: "MarianTV+ (Directo)" }
+    ];
+    const finish = (cats) => {
+      if (sent) return;
+      sent = true;
+      const merged = [...baseMerged];
+      const seenNames = new Set(merged.map(m => m.name.toLowerCase()));
       (cats || []).forEach(c => {
+        const cname = c.name === "ChannelList" ? "Portal Todos" : String(c.name || "");
         if (String(c.id) !== "76182" && !merged.some(m => String(m.id) === String(c.id))) {
-          merged.push({ id: String(c.id), name: c.name === "ChannelList" ? "Portal Todos" : c.name });
+          const label = seenNames.has(cname.toLowerCase()) ? `${cname} (Portal)` : cname;
+          seenNames.add(label.toLowerCase());
+          merged.push({ id: String(c.id), name: label });
         }
       });
       sendJson(res, 200, { categories: merged });
+    };
+    const t = setTimeout(() => finish([]), 3500);
+    return magis.getLiveCategories((err, cats) => {
+      clearTimeout(t);
+      finish(cats);
     });
   }
 
-  // API: Live Channels by Category (merged Mariantv_plus + Marianflix Portal)
+  // API: Live Channels by Category (merged Mariantv_plus + Marianflix Portal, never hangs!)
   if (pathname === "/api/live-channels") {
     const rawCol = String(parsed.query.columnId || "__ALL_MERGED__");
     if (rawCol === "__ARGENTINA__") {
       const localArg = localTvPlusChannels.filter(c => c.category.toLowerCase() === "argentina");
-      return magis.getLiveChannels(76182, 1, 250, (err, chs) => {
-        const portalList = Array.isArray(chs) ? chs : [];
-        const argRe = /\b(arg|argentina|telefe|el trece|eltrece|tn|c5n|tyc|america tv|américa|canal 9|elnueve|tv publica|tv pública|a24|cronica|crónica|ciudad magazine|volver|net tv|canal 26|deportv|tnt sports|espn premium|encuentro|pakapaka)\b/i;
-        const out = [...localArg];
-        const seen = new Set(out.map(c => c.channelCode));
-        let nextNum = out.reduce((m, c) => Math.max(m, c.number || 100), 100) + 1;
-        portalList.forEach(p => {
-          const code = String(p.channelCode || p.id || "");
-          const nm = String(p.name || p.title || "");
-          if (code && !seen.has(code) && argRe.test(nm)) {
-            seen.add(code);
-            out.push(Object.assign({}, p, { category: "Argentina", index: nextNum, number: nextNum }));
-            nextNum++;
-          }
-        });
-        return sendJson(res, 200, { channels: out });
+      return sendJson(res, 200, { channels: localArg });
+    }
+    if (rawCol.startsWith("__LOCAL_CAT__:")) {
+      const targetCat = rawCol.slice("__LOCAL_CAT__:".length).toLowerCase();
+      return sendJson(res, 200, {
+        channels: localTvPlusChannels.filter(c => c.category.toLowerCase() === targetCat)
       });
     }
     if (rawCol === "__MARIANTV__") {
       return sendJson(res, 200, { channels: localTvPlusChannels });
     }
     const colId = (rawCol === "__ALL_MERGED__" || rawCol === "76182") ? 76182 : (parseInt(rawCol, 10) || 76182);
-    return magis.getLiveChannels(colId, 1, 250, (err, chs) => {
+    let sent = false;
+    const finish = (chs) => {
+      if (sent) return;
+      sent = true;
       const portalList = Array.isArray(chs) ? chs : [];
       if (rawCol === "__ALL_MERGED__" || rawCol === "76182") {
         const out = [...localTvPlusChannels];
@@ -506,6 +520,11 @@ try {
         return sendJson(res, 200, { channels: out });
       }
       sendJson(res, 200, { channels: portalList });
+    };
+    const t = setTimeout(() => finish([]), 3500);
+    return magis.getLiveChannels(colId, 1, 250, (err, chs) => {
+      clearTimeout(t);
+      finish(chs);
     });
   }
 

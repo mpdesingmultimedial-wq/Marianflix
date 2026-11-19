@@ -1337,48 +1337,79 @@
       return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
     }
 
-    async function apiGet(path) {
+    async function apiGet(path, timeoutMs = 8000) {
       const url = path.startsWith("http") ? path : (API_BASE + path);
-      const res = await fetch(url);
-      if (!res.ok) throw new Error("HTTP " + res.status);
-      return res.json();
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { signal: ctrl.signal });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return await res.json();
+      } finally {
+        clearTimeout(t);
+      }
     }
 
     async function initCatalog() {
       state.featured = (SNAP.featured || []).map(x => normalizeItem(x, "movie")).filter(Boolean);
       state.movies = (SNAP.movies || []).map(x => normalizeItem(x, "movie")).filter(Boolean);
       state.series = (SNAP.series || []).map(x => normalizeItem(x, "series")).filter(Boolean);
-      state.liveCategories = (SNAP.liveCategories || []).map(c => ({
-        id: String(c.id),
-        name: c.name === "ChannelList" ? "Todos" : c.name
-      }));
+      state.liveCategories = [
+        { id: "__ALL_MERGED__", name: "Todos (Fusión)" },
+        { id: "__ARGENTINA__", name: "Argentina" },
+        { id: "__MARIANTV__", name: "MarianTV+ (Directo)" },
+        ...(SNAP.liveCategories || [])
+          .filter(c => String(c.id) !== "76182")
+          .map(c => ({ id: String(c.id), name: c.name === "ChannelList" ? "Portal Todos" : c.name }))
+      ];
       state.liveChannels = SNAP.liveChannels || [];
       render();
 
-      // Live refresh from Node backend if running
-      try {
-        const [fRes, mRes, sRes, cRes, chRes] = await Promise.all([
-          apiGet("/api/home?root=featured"),
-          apiGet("/api/home?root=movies"),
-          apiGet("/api/home?root=series"),
-          apiGet("/api/live-categories"),
-          apiGet("/api/live-channels?columnId=__ALL_MERGED__")
-        ]);
-        if (fRes.items && fRes.items.length) state.featured = fRes.items.map(x => normalizeItem(x, "movie")).filter(Boolean);
-        if (mRes.items && mRes.items.length) state.movies = mRes.items.map(x => normalizeItem(x, "movie")).filter(Boolean);
-        if (sRes.items && sRes.items.length) state.series = sRes.items.map(x => normalizeItem(x, "series")).filter(Boolean);
-        if (cRes.categories && cRes.categories.length) {
-          state.liveCategories = cRes.categories.map(c => ({
-            id: String(c.id),
-            name: c.name === "ChannelList" ? "Todos" : c.name
-          }));
+      // Fire each endpoint independently so fast TV/Argentina updates render IMMEDIATELY without waiting for VOD!
+      apiGet("/api/live-categories", 5000).then(cRes => {
+        if (cRes && cRes.categories && cRes.categories.length) {
+          const mergedCats = [];
+          const seenIds = new Set();
+          [...cRes.categories, ...state.liveCategories].forEach(c => {
+            const cid = String(c.id);
+            if (!seenIds.has(cid)) {
+              seenIds.add(cid);
+              mergedCats.push({ id: cid, name: c.name === "ChannelList" ? "Todos" : c.name });
+            }
+          });
+          state.liveCategories = mergedCats;
+          render();
         }
+      }).catch(() => {});
+
+      apiGet("/api/live-channels?columnId=__ALL_MERGED__", 6000).then(chRes => {
         if (chRes && Array.isArray(chRes.channels) && chRes.channels.length) {
           state.liveChannels = chRes.channels;
           state.liveLoadedFromApi = true;
+          render();
         }
-        render();
-      } catch (_) {}
+      }).catch(() => {});
+
+      apiGet("/api/home?root=featured", 10000).then(fRes => {
+        if (fRes && fRes.items && fRes.items.length) {
+          state.featured = fRes.items.map(x => normalizeItem(x, "movie")).filter(Boolean);
+          render();
+        }
+      }).catch(() => {});
+
+      apiGet("/api/home?root=movies", 12000).then(mRes => {
+        if (mRes && mRes.items && mRes.items.length) {
+          state.movies = mRes.items.map(x => normalizeItem(x, "movie")).filter(Boolean);
+          render();
+        }
+      }).catch(() => {});
+
+      apiGet("/api/home?root=series", 12000).then(sRes => {
+        if (sRes && sRes.items && sRes.items.length) {
+          state.series = sRes.items.map(x => normalizeItem(x, "series")).filter(Boolean);
+          render();
+        }
+      }).catch(() => {});
     }
 
     setInterval(() => {
@@ -1957,8 +1988,27 @@
     function renderLive() {
       const rawCats = state.liveCategories.length
         ? state.liveCategories
-        : [{ id: "76182", name: "Todos" }, { id: "76206", name: "Deportes" }, { id: "76205", name: "Cine y Series" }];
-      const cats = [rawCats[0], { id: "__FAVS__", name: "♥ Favoritos" }, ...rawCats.slice(1)];
+        : [
+            { id: "__ALL_MERGED__", name: "Todos (Fusión)" },
+            { id: "__ARGENTINA__", name: "Argentina" },
+            { id: "__MARIANTV__", name: "MarianTV+ (Directo)" }
+          ];
+      const baseList = [];
+      const seenCat = new Set();
+      [
+        { id: "__ALL_MERGED__", name: "Todos (Fusión)" },
+        { id: "__ARGENTINA__", name: "Argentina" },
+        { id: "__FAVS__", name: "♥ Favoritos" },
+        { id: "__MARIANTV__", name: "MarianTV+ (Directo)" },
+        ...rawCats
+      ].forEach(c => {
+        const cid = String(c.id);
+        if (!seenCat.has(cid)) {
+          seenCat.add(cid);
+          baseList.push({ id: cid, name: cid === "__ARGENTINA__" ? "Argentina" : c.name });
+        }
+      });
+      const cats = baseList;
       const activeCat = cats.find(c => c.id === state.selectedLiveCat) || cats[0];
       const q = state.liveSearch.trim().toLowerCase();
       const baseChs = state.selectedLiveCat === "__FAVS__"
@@ -2252,16 +2302,17 @@
 
     async function openDetail(id) {
       const modal = document.getElementById("detailModal");
-      const box = document.getElementById("detailContent");
-      const baseItem = findItemById(id) || { id, title: id, year: "2025", score: "8.5", genres: [], synopsis: "", poster: "", backdrop: "" };
+      const baseItem = findItemById(id) || { id, title: id, year: "2026", score: "8.5", genres: [], synopsis: "", poster: "", backdrop: "" };
       modal.classList.add("open");
 
-      let episodes = [];
-      let detailItem = baseItem;
-      box.innerHTML = `<div style="padding:40px;text-align:center;">Cargando detalles de ${escapeHtml(baseItem.title)}...</div>`;
+      // Render immediately with local metadata so it NEVER gets stuck on "Cargando detalles..."
+      state.activeDetail = { item: baseItem, episodes: [] };
+      renderDetailModal();
 
       try {
-        const d = await apiGet(`/api/detail?id=${encodeURIComponent(id)}`);
+        const d = await apiGet(`/api/detail?id=${encodeURIComponent(id)}`, 6000);
+        let detailItem = baseItem;
+        let episodes = [];
         if (d && d.item) detailItem = normalizeItem(d.item, baseItem.kind) || baseItem;
         if (d && Array.isArray(d.episodes)) {
           episodes = d.episodes;
@@ -2269,10 +2320,11 @@
             episodes = [];
           }
         }
+        if (state.activeDetail && state.activeDetail.item.id === baseItem.id) {
+          state.activeDetail = { item: detailItem, episodes };
+          renderDetailModal();
+        }
       } catch (_) {}
-
-      state.activeDetail = { item: detailItem, episodes };
-      renderDetailModal();
     }
 
     function renderDetailModal() {

@@ -36,8 +36,8 @@ var crypto = require("crypto"),
   SLB_TTL = 3e5,
   SEED_URL =
     "https://raw.githubusercontent.com/cristianco7/XUPER-HYDRA-PORT-WEBOS/seeds/seeds.json",
-  SEED_FILE = "/tmp/xuper-seeds.json",
-  SEED_DEAD_FILE = "/tmp/xuper-seeds-dead.json",
+  SEED_FILE = path.join(require("os").tmpdir(), "xuper-seeds.json"),
+  SEED_DEAD_FILE = path.join(require("os").tmpdir(), "xuper-seeds-dead.json"),
   SEED_MAX = 200,
   SEED_MIN_LIFE_MS = 3e5,
   SEED_RESCUE_ROUNDS = 3,
@@ -626,7 +626,7 @@ function writeJsonSafe(e, r) {
    y con esto el primer título abre igual de rápido que el segundo. Se descarta
    pasados SESSION_FILE_MS o si el portal la rechaza (el código de sesión muerta
    vuelve a activar limpio). */
-var SESSION_FILE = "/tmp/xuper-session.json",
+var SESSION_FILE = path.join(require("os").tmpdir(), "xuper-session.json"),
   SESSION_FILE_MS = 54e5;
 function saveStoredSession() {
   if (!session.userId || !session.userToken) return;
@@ -700,6 +700,23 @@ function seedIsUsable(e) {
 function usableSeeds() {
   for (var e = [], r = 0; r < seedPool.length; r++)
     seedIsUsable(seedPool[r]) && e.push(seedPool[r]);
+  if (e.length) return e;
+  // Fallback: if all seeds are past client-side exp hint (e.g. clock skew or pool delay),
+  // still try newest non-dead seeds because portal tokens often remain valid much longer.
+  for (var i = 0; i < seedPool.length; i++) {
+    var s = seedPool[i];
+    if (s && trim(s.userId) && trim(s.userToken) && !seedIsDead(s)) e.push(s);
+  }
+  if (!e.length && seedPool.length) {
+    deadSeeds = {};
+    for (var j = 0; j < seedPool.length; j++) {
+      var s2 = seedPool[j];
+      if (s2 && trim(s2.userId) && trim(s2.userToken)) e.push(s2);
+    }
+  }
+  e.sort(function (a, b) {
+    return (Number(b.exp) || 0) - (Number(a.exp) || 0);
+  });
   return e;
 }
 function storeSeeds(e) {
@@ -737,7 +754,7 @@ function refreshSeeds(e) {
     if (lastSeedFailure && r - lastSeedFailure < SEED_FAILED_COOLDOWN_MS)
       return e(null, !1);
     seedInflight = !0;
-    var t = url.parse(SEED_URL);
+    var t = url.parse(SEED_URL + "?_t=" + Date.now());
     ((t.method = "GET"),
       (t.rejectUnauthorized = !1),
       (t.headers = { "User-Agent": "XuperTV/webOS" }),
@@ -803,11 +820,9 @@ function refreshSeeds(e) {
 function pickSeed(e) {
   var r = usableSeeds();
   if (!r.length) return null;
-  for (var t = r.length - 1; t > 0; t--) {
-    var n = Math.floor(Math.random() * (t + 1)),
-      s = r[t];
-    ((r[t] = r[n]), (r[n] = s));
-  }
+  r.sort(function (a, b) {
+    return (Number(b.exp) || 0) - (Number(a.exp) || 0);
+  });
   for (var a = 0; a < r.length; a++) if (!e[seedIdentity(r[a])]) return r[a];
   return null;
 }

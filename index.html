@@ -905,6 +905,66 @@
       max-width: 65%;
       max-height: 65%;
       object-fit: contain;
+      position: relative;
+      z-index: 1;
+    }
+    .flow-preview-screen video {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      max-height: none;
+      object-fit: contain;
+      background: #000;
+      z-index: 2;
+      opacity: 0;
+      transition: opacity 0.25s ease;
+    }
+    .flow-preview-screen video.playing {
+      opacity: 1;
+    }
+    .flow-preview-mute {
+      position: absolute;
+      bottom: 8px;
+      left: 8px;
+      z-index: 4;
+      background: rgba(10, 14, 20, 0.85);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.28);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .flow-preview-expand {
+      position: absolute;
+      bottom: 8px;
+      right: 8px;
+      z-index: 4;
+      background: rgba(10, 14, 20, 0.82);
+      color: #fff;
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      font-weight: 700;
+      pointer-events: none;
+    }
+    .epg-row-flex {
+      display: flex;
+      align-items: stretch;
+      gap: 12px;
+    }
+    .epg-ch-col {
+      width: 155px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 4px;
+    }
+    .flow-pill, .pill, .flow-badge, .flow-live-clock {
+      white-space: nowrap;
     }
     .flow-btn-watch {
       background: #00e5b4;
@@ -930,9 +990,32 @@
       .flow-split { grid-template-columns: 1fr; }
       .flow-preview-card { display: none; }
       .flow-guide-list { max-height: none; }
+      .epg-row-flex { flex-direction: column; gap: 8px; }
+      .epg-ch-col { width: 100%; flex-direction: row; align-items: center; gap: 8px; }
       .poster-card { flex: 0 0 124px; width: 124px; }
       .media-grid { grid-template-columns: repeat(auto-fill, minmax(114px, 1fr)); gap: 12px; }
       .mobile-bottom-nav { display: flex; }
+    }
+
+    @media (max-height: 520px) and (min-width: 580px) {
+      .hero { height: auto; min-height: 260px; padding: 18px 18px; }
+      .flow-split { grid-template-columns: 1.15fr 0.95fr; gap: 12px; }
+      .flow-preview-card {
+        display: flex;
+        padding: 10px;
+        gap: 8px;
+        max-height: calc(100vh - 96px);
+        overflow-y: auto;
+        top: 68px;
+      }
+      .flow-preview-screen {
+        aspect-ratio: auto;
+        height: 145px;
+        flex-shrink: 0;
+      }
+      .flow-guide-list {
+        max-height: calc(100vh - 96px);
+      }
     }
   </style>
 </head>
@@ -993,6 +1076,13 @@
         <button class="pill" id="btnSubMenu" onclick="openTrackMenu('sub')">💬 Subtítulos</button>
         <button class="pill" onclick="restartCurrentVideo()">↺ Reiniciar</button>
         <button class="pill" onclick="toggleFullscreenPlayer()">⛶</button>
+      </div>
+      <div style="display:none;align-items:center;gap:8px;flex-wrap:wrap;" id="playerLiveControls">
+        <button class="flow-pill" onclick="zapLiveChannel(-1)">CH ▼</button>
+        <button class="flow-pill" onclick="zapLiveChannel(1)">CH ▲</button>
+        <button class="flow-pill" id="btnLiveFav" onclick="toggleActiveLiveFav()">♡ Fav</button>
+        <button class="flow-pill" id="btnLiveZoom" onclick="toggleLiveZoom()">Zoom: Ajustar</button>
+        <button class="flow-pill" onclick="toggleFullscreenPlayer()">⛶</button>
       </div>
     </div>
     <div class="player-video-wrap" id="playerVideoWrap" onmousemove="showPlayerOverlay()" onclick="if(event.target.id==='videoEl')togglePlayPause()">
@@ -1062,7 +1152,8 @@
       series: [],
       liveCategories: [],
       liveChannels: [],
-      selectedLiveCat: "76182",
+      selectedLiveCat: "__ALL_MERGED__",
+      liveTab: 0,
       selectedLiveChannelId: null,
       liveSearch: "",
       selectedCategory: "Todas",
@@ -1577,37 +1668,225 @@
       render();
     }
 
+    function getLiveFavs() {
+      try { return JSON.parse(localStorage.getItem("mf_web_live_favs") || "[]"); } catch (_) { return []; }
+    }
+    function isLiveFav(code) { return getLiveFavs().includes(String(code)); }
+    function toggleLiveFav(code, ev) {
+      if (ev) ev.stopPropagation();
+      const id = String(code);
+      const list = getLiveFavs();
+      const idx = list.indexOf(id);
+      if (idx >= 0) list.splice(idx, 1); else list.push(id);
+      localStorage.setItem("mf_web_live_favs", JSON.stringify(list));
+      render();
+      updateLiveFavBtn();
+    }
+
+    function getWebEpgSchedule(ch, count = 3) {
+      const name = String((ch && (ch.name || ch.title)) || "");
+      const cat = String((ch && ch.category) || "");
+      const num = Number((ch && (ch.index || ch.number)) || 1);
+      const txt = (cat + " " + name).toLowerCase();
+      let pool = [
+        ["Magazine en Vivo", "Actualidad, espectáculos, invitados y entretenimiento."],
+        ["Prime Time Show", "El programa central de la noche en vivo."],
+        ["Ficción y Entretenimiento", "Contenido destacado de la programación diaria."],
+        ["Cultura y Sociedad", "Historias, documentales y entrevistas en profundidad."],
+        ["Late Night en Vivo", "Humor, música e invitados especiales."]
+      ];
+      if (/notic|news|26|tn\b|c5n|dw/.test(txt)) {
+        pool = [
+          ["Edición Central de Noticias", "Resumen informativo con móviles en vivo y análisis."],
+          ["Panorama Internacional", "Cobertura global de actualidad, economía y política."],
+          ["Debate Abierto", "Mesa de periodistas y especialistas analizando el día."],
+          ["Última Hora 24", "Flash informativo continuo y estado del tránsito."]
+        ];
+      } else if (/deport|sport|tyc|espn|fox|win/.test(txt)) {
+        pool = [
+          ["Fútbol en Vivo: Especial Jornada", "Transmisión en directo, previas y análisis táctico."],
+          ["SportsCenter / Resumen", "Goles, estadísticas y lo mejor del deporte mundial."],
+          ["Mesa Deportiva", "Debate, entrevistas y actualidad de las ligas."],
+          ["Automovilismo y Motor", "Clasificaciones, carreras y cobertura en pista."]
+        ];
+      } else if (/cine|movie|film|serie|hbo|amc/.test(txt)) {
+        pool = [
+          ["Estreno de Cine: Acción Total", "Largometraje en alta definición sin cortes."],
+          ["Noche de Suspenso", "Thriller cinematográfico seleccionado."],
+          ["Cine Clásico Restaurado", "Película destacada en calidad digital."],
+          ["Maratón de Series", "Episodios continuados de drama y misterio."]
+        ];
+      } else if (/kid|infantil|cartoon|disney|anim/.test(txt)) {
+        pool = [
+          ["Aventuras Animadas", "Episodios divertidos para los más chicos."],
+          ["Mundo Kids", "Series educativas, música y juegos."],
+          ["Súper Héroes Junior", "Capítulo estreno de animación."]
+        ];
+      } else if (/music|músic|mtv|htv/.test(txt)) {
+        pool = [
+          ["Top Hits 24/7", "Los videos musicales más escuchados del momento."],
+          ["Sesiones en Vivo", "Recitales y acústicos exclusivos."],
+          ["Clásicos del Rock & Pop", "Éxitos inolvidables de todas las décadas."]
+        ];
+      }
+      const nowMs = Date.now();
+      const slotMs = (num % 2 === 0) ? 3600000 : 1800000;
+      const base = Math.floor(nowMs / slotMs) * slotMs;
+      const pad2 = n => (n < 10 ? "0" + n : "" + n);
+      const fmt = ms => { const d = new Date(ms); return `${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+      const out = [];
+      for (let i = 0; i < count; i++) {
+        const start = base + i * slotMs;
+        const end = start + slotMs;
+        const idx = Math.abs(Math.floor(start / slotMs) + num * 7) % pool.length;
+        const pct = Math.max(5, Math.min(98, Math.round(((nowMs - start) / slotMs) * 100)));
+        out.push({ title: pool[idx][0], desc: pool[idx][1], range: `${fmt(start)} - ${fmt(end)}`, pct });
+      }
+      return out;
+    }
+
+    let previewHls = null;
+    let previewTimer = null;
+    let previewActiveCode = "";
+    let previewMuted = true;
+
+    function stopLivePreview() {
+      if (previewTimer) { clearTimeout(previewTimer); previewTimer = null; }
+      previewActiveCode = "";
+      if (previewHls) {
+        try { previewHls.destroy(); } catch (_) {}
+        previewHls = null;
+      }
+      const pv = document.getElementById("previewVideoEl");
+      if (pv) {
+        try { pv.pause(); pv.removeAttribute("src"); pv.load(); } catch (_) {}
+        pv.classList.remove("playing");
+      }
+    }
+
+    function togglePreviewMute(ev) {
+      if (ev) ev.stopPropagation();
+      previewMuted = !previewMuted;
+      const pv = document.getElementById("previewVideoEl");
+      if (pv) pv.muted = previewMuted;
+      const btn = document.getElementById("previewMuteBtn");
+      if (btn) btn.textContent = previewMuted ? "🔇 Sonido" : "🔊 Sonido";
+    }
+
+    function scheduleLivePreview(code) {
+      if (!code || state.section !== "live" || state.liveTab !== 0) {
+        stopLivePreview();
+        return;
+      }
+      if (window.innerWidth < 580) {
+        stopLivePreview();
+        return;
+      }
+      if (previewTimer) clearTimeout(previewTimer);
+      previewTimer = setTimeout(() => startLivePreview(code), 380);
+    }
+
+    async function startLivePreview(code) {
+      if (!code || state.section !== "live" || state.liveTab !== 0) return;
+      const modal = document.getElementById("playerModal");
+      if (modal && modal.classList.contains("open")) return;
+      const pv = document.getElementById("previewVideoEl");
+      if (!pv) return;
+      if (previewActiveCode === code && previewHls) return;
+
+      stopLivePreview();
+      previewActiveCode = code;
+
+      try {
+        const chObj = state.liveChannels.find(c => String(c.channelCode || c.id) === String(code));
+        let streamUrl = "";
+        if (chObj && chObj.streamUrl && /^https?:\/\//i.test(chObj.streamUrl)) {
+          streamUrl = chObj.streamUrl;
+        } else {
+          const data = await apiGet(`/api/resolve-live?code=${encodeURIComponent(code)}`);
+          if (previewActiveCode !== code) return;
+          streamUrl = data.streamUrl ? (data.streamUrl.startsWith("http") ? data.streamUrl : (API_BASE + data.streamUrl)) : (data.proxyUrl || "");
+        }
+        if (!streamUrl || previewActiveCode !== code) return;
+
+        const videoEl = document.getElementById("previewVideoEl");
+        if (!videoEl) return;
+        videoEl.muted = previewMuted;
+        videoEl.playsInline = true;
+        videoEl.onplaying = () => videoEl.classList.add("playing");
+
+        if (window.Hls && Hls.isSupported()) {
+          previewHls = new Hls({ maxBufferLength: 10, maxMaxBufferLength: 20, enableWorker: true });
+          previewHls.loadSource(streamUrl);
+          previewHls.attachMedia(videoEl);
+          previewHls.on(Hls.Events.MANIFEST_PARSED, () => {
+            videoEl.play().catch(() => {});
+          });
+          previewHls.on(Hls.Events.ERROR, (_, errData) => {
+            if (errData && errData.fatal) {
+              try { previewHls.destroy(); } catch (_) {}
+              previewHls = null;
+              videoEl.classList.remove("playing");
+            }
+          });
+        } else if (videoEl.canPlayType("application/vnd.apple.mpegurl")) {
+          videoEl.src = streamUrl;
+          videoEl.play().catch(() => {});
+        }
+      } catch (_) {}
+    }
+
     function selectFlowPreview(code) {
+      if (state.selectedLiveChannelId === code) return;
       state.selectedLiveChannelId = code;
       render();
+      scheduleLivePreview(code);
+    }
+
+    function onClickFlowChannel(code, name) {
+      const hasPreviewPane = window.innerWidth >= 580 && !(window.innerWidth <= 768 && window.innerHeight > 520);
+      if (hasPreviewPane && state.selectedLiveChannelId !== code) {
+        // 1er clic / toque: selecciona el canal y reproduce en la pantalla derecha
+        previewMuted = false;
+        state.selectedLiveChannelId = code;
+        localStorage.setItem("mf_web_last_live", code);
+        render();
+        scheduleLivePreview(code);
+      } else {
+        // 2do clic / toque o Enter: agranda a pantalla completa
+        stopLivePreview();
+        startLivePlayback(code, name);
+      }
     }
 
     function renderLive() {
-      const cats = state.liveCategories.length
+      const rawCats = state.liveCategories.length
         ? state.liveCategories
         : [{ id: "76182", name: "Todos" }, { id: "76206", name: "Deportes" }, { id: "76205", name: "Cine y Series" }];
+      const cats = [rawCats[0], { id: "__FAVS__", name: "♥ Favoritos" }, ...rawCats.slice(1)];
       const activeCat = cats.find(c => c.id === state.selectedLiveCat) || cats[0];
       const q = state.liveSearch.trim().toLowerCase();
-      const chs = state.liveChannels.filter(c => {
+      const baseChs = state.selectedLiveCat === "__FAVS__"
+        ? state.liveChannels.filter(c => isLiveFav(c.channelCode || c.id))
+        : state.liveChannels;
+      const chs = baseChs.filter(c => {
         if (!q) return true;
         return String(c.name || "").toLowerCase().includes(q) || String(c.index || c.number || "").includes(q);
       });
 
       const now = new Date();
       const pad2 = n => (n < 10 ? "0" + n : "" + n);
-      const hr = now.getHours();
-      const mn = now.getMinutes();
-      const nextHr = (hr + 1) % 24;
-      const timeStr = `${pad2(hr)}:${pad2(mn)}`;
-      const slotStr = `${pad2(hr)}:00 - ${pad2(nextHr)}:00`;
-      const nextSlotStr = `${pad2(nextHr)}:00 - ${pad2((nextHr + 1) % 24)}:00`;
-      const pct = Math.max(6, Math.min(98, Math.round((mn / 60) * 100)));
+      const timeStr = `${pad2(now.getHours())}:${pad2(now.getMinutes())}`;
 
-      const activeCh = chs.find(c => (c.channelCode || c.id) === state.selectedLiveChannelId) || chs[0] || null;
+      const lastId = localStorage.getItem("mf_web_last_live") || "";
+      const activeCh = chs.find(c => (c.channelCode || c.id) === state.selectedLiveChannelId)
+        || chs.find(c => (c.channelCode || c.id) === lastId)
+        || chs[0] || null;
       const activeCode = activeCh ? (activeCh.channelCode || activeCh.id) : "";
       const activeName = activeCh ? (activeCh.name || activeCh.title || "Canal") : "";
       const activeLogo = activeCh ? (activeCh.logo || activeCh.poster || "") : "";
       const activeNum = activeCh ? (activeCh.index || activeCh.number || 1) : 1;
+      const activeSched = activeCh ? getWebEpgSchedule(activeCh, 3) : [];
 
       return `
         <div class="flow-page">
@@ -1617,6 +1896,8 @@
               <h1 style="font-size:22px;font-weight:900;color:#fff;">Guía TV • ${escapeHtml(activeCat ? activeCat.name : "En Vivo")} (${chs.length})</h1>
             </div>
             <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+              <button class="flow-pill ${state.liveTab===0?'active':''}" onclick="state.liveTab=0;render();">Canales</button>
+              <button class="flow-pill ${state.liveTab===1?'active':''}" onclick="stopLivePreview();state.liveTab=1;render();">Guía EPG</button>
               <input
                 type="text"
                 class="search-input"
@@ -1625,18 +1906,49 @@
                 value="${escapeHtml(state.liveSearch)}"
                 oninput="state.liveSearch=this.value;render();"
               />
-              <span class="flow-live-clock">● EN VIVO ${timeStr}</span>
+              <span class="flow-live-clock">● ${timeStr}</span>
             </div>
           </div>
 
           <div class="pills-row">
             ${cats.map(c => `
-              <button class="flow-pill ${state.selectedLiveCat===c.id?'active':''}" onclick="loadLiveCategory('${escapeHtml(c.id)}')">
+              <button class="flow-pill ${state.selectedLiveCat===c.id?'active':''}" onclick="if('${escapeHtml(c.id)}'==='__FAVS__'){state.selectedLiveCat='__FAVS__';render();}else{loadLiveCategory('${escapeHtml(c.id)}');}">
                 ${escapeHtml(c.name)}
               </button>
             `).join("")}
           </div>
 
+          ${state.liveTab === 1 ? `
+            <div style="display:flex;flex-direction:column;gap:8px;margin-top:12px;">
+              ${chs.slice(0, 120).map((ch, idx) => {
+                const code = ch.channelCode || ch.id;
+                const name = ch.name || ch.title || ("Canal " + (idx + 1));
+                const num = ch.index || ch.number || (idx + 1);
+                const logo = ch.logo || ch.poster || "";
+                const sched = getWebEpgSchedule(ch, 4);
+                return `
+                  <div class="flow-row epg-row-flex" onclick="stopLivePreview();startLivePlayback('${escapeHtml(code)}', '${escapeHtml(name)}')">
+                    <div class="epg-ch-col">
+                      <div style="display:flex;align-items:center;gap:8px;">
+                        <span class="flow-ch-num" style="min-width:34px;font-size:14px;">${String(num).padStart(3, "0")}</span>
+                        <div class="flow-logo-tile" style="width:40px;height:26px;"><img loading="lazy" src="${escapeHtml(logo)}" alt="" onerror="this.style.opacity=0.2" /></div>
+                      </div>
+                      <div style="font-size:12px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(name)}</div>
+                    </div>
+                    <div style="display:flex;gap:8px;overflow-x:auto;flex:1;">
+                      ${sched.map((p, sIdx) => `
+                        <div style="min-width:190px;flex:1;background:${sIdx===0?'#193035':'#0e1520'};border:1px solid ${sIdx===0?'#00e5b4':'#223042'};border-radius:8px;padding:8px;display:flex;flex-direction:column;gap:4px;">
+                          <div style="font-size:10px;font-weight:800;color:${sIdx===0?'#00e5b4':'#8ea0b4'};">${sIdx===0 ? '● AHORA ' : ''}${p.range}</div>
+                          <div style="font-size:12px;font-weight:700;color:#fff;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(p.title)}</div>
+                          ${sIdx===0 ? `<div class="flow-prog-bar"><div class="flow-prog-fill" style="width:${p.pct}%"></div></div>` : ''}
+                        </div>
+                      `).join("")}
+                    </div>
+                  </div>
+                `;
+              }).join("")}
+            </div>
+          ` : `
           <div class="flow-split">
             <div class="flow-guide-list">
               ${chs.map((ch, idx) => {
@@ -1646,8 +1958,10 @@
                 const logo = ch.logo || ch.poster || "";
                 const isSel = code === activeCode;
                 const isHd = /hd|fhd/i.test(name);
+                const isFav = isLiveFav(code);
+                const epg = getWebEpgSchedule(ch, 1)[0];
                 return `
-                  <div class="flow-row ${isSel ? 'active' : ''}" onmouseenter="if(window.innerWidth>768)selectFlowPreview('${escapeHtml(code)}')" onclick="startLivePlayback('${escapeHtml(code)}', '${escapeHtml(name)}')">
+                  <div class="flow-row ${isSel ? 'active' : ''}" onmouseenter="if(window.innerWidth>768)selectFlowPreview('${escapeHtml(code)}')" onclick="onClickFlowChannel('${escapeHtml(code)}', '${escapeHtml(name)}')">
                     <span class="flow-ch-num">${String(num).padStart(3, "0")}</span>
                     <div class="flow-logo-tile">
                       <img loading="lazy" src="${escapeHtml(logo)}" alt="${escapeHtml(name)}" onerror="this.style.opacity=0.2" />
@@ -1657,9 +1971,10 @@
                         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</span>
                         ${isHd ? `<span class="flow-hd-tag">${/fhd/i.test(name) ? "FHD" : "HD"}</span>` : ""}
                       </div>
-                      <div class="flow-epg-sub">En vivo • ${slotStr} • ${escapeHtml(activeCat ? activeCat.name : "TV")}</div>
-                      <div class="flow-prog-bar"><div class="flow-prog-fill" style="width:${pct}%"></div></div>
+                      <div class="flow-epg-sub">${epg.range} • ${escapeHtml(epg.title)}</div>
+                      <div class="flow-prog-bar"><div class="flow-prog-fill" style="width:${epg.pct}%"></div></div>
                     </div>
+                    <button style="background:none;border:none;font-size:18px;cursor:pointer;color:${isFav ? '#ff4d57' : '#7a8c9e'};padding:4px;" onclick="toggleLiveFav('${escapeHtml(code)}', event)">${isFav ? "♥" : "♡"}</button>
                     <div class="flow-play-circle">▶</div>
                   </div>
                 `;
@@ -1668,34 +1983,47 @@
 
             ${activeCh ? `
               <aside class="flow-preview-card">
-                <div class="flow-preview-screen" onclick="startLivePlayback('${escapeHtml(activeCode)}', '${escapeHtml(activeName)}')">
+                <div class="flow-preview-screen" onclick="stopLivePreview();startLivePlayback('${escapeHtml(activeCode)}', '${escapeHtml(activeName)}')">
                   <img src="${escapeHtml(activeLogo)}" alt="${escapeHtml(activeName)}" onerror="this.style.opacity=0.2" />
-                  <span style="position:absolute;top:10px;left:10px;background:#00e5b4;color:#041411;font-weight:900;font-size:11px;padding:3px 8px;border-radius:4px;">● EN VIVO</span>
-                  <span style="position:absolute;top:10px;right:10px;background:rgba(10,14,20,0.85);color:#00e5b4;font-weight:800;font-size:12px;padding:3px 8px;border-radius:6px;">Canal ${activeNum}</span>
+                  <video id="previewVideoEl" autoplay playsinline ${previewMuted ? "muted" : ""}></video>
+                  <span style="position:absolute;top:10px;left:10px;z-index:4;background:#00e5b4;color:#041411;font-weight:900;font-size:11px;padding:3px 8px;border-radius:4px;">● EN VIVO</span>
+                  <span style="position:absolute;top:10px;right:10px;z-index:4;background:rgba(10,14,20,0.85);color:#00e5b4;font-weight:800;font-size:12px;padding:3px 8px;border-radius:6px;">CH ${activeNum}</span>
+                  <button id="previewMuteBtn" class="flow-preview-mute" onclick="togglePreviewMute(event)">${previewMuted ? "🔇 Sonido" : "🔊 Sonido"}</button>
+                  <span class="flow-preview-expand">⛶ Clic para agrandar</span>
                 </div>
                 <h2 style="font-size:22px;font-weight:900;color:#fff;">${escapeHtml(activeName)}</h2>
                 <div style="font-size:13px;color:#9eb0c2;">Categoría: ${escapeHtml(activeCat ? activeCat.name : "En Vivo")} • Señal en directo</div>
                 <div style="background:#0e1520;border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;">
                   <div style="display:flex;justify-content:space-between;font-size:11px;font-weight:900;">
                     <span style="color:#00e5b4;">AHORA EN VIVO</span>
-                    <span style="color:#b8c6d6;">${slotStr}</span>
+                    <span style="color:#b8c6d6;">${activeSched[0].range}</span>
                   </div>
-                  <div style="font-size:14px;font-weight:700;color:#fff;">Transmisión en directo • ${escapeHtml(activeName)}</div>
-                  <div class="flow-prog-bar"><div class="flow-prog-fill" style="width:${pct}%"></div></div>
-                  <div style="font-size:12px;color:#8ea0b4;">A continuación (${nextSlotStr}): Programación continuada</div>
+                  <div style="font-size:14px;font-weight:700;color:#fff;">${escapeHtml(activeSched[0].title)}</div>
+                  <div style="font-size:12px;color:#9eb0c2;">${escapeHtml(activeSched[0].desc)}</div>
+                  <div class="flow-prog-bar"><div class="flow-prog-fill" style="width:${activeSched[0].pct}%"></div></div>
+                  ${activeSched.slice(1).map(nxt => `<div style="font-size:12px;color:#8ea0b4;">Próximo (${nxt.range}): ${escapeHtml(nxt.title)}</div>`).join("")}
                 </div>
-                <button class="flow-btn-watch" onclick="startLivePlayback('${escapeHtml(activeCode)}', '${escapeHtml(activeName)}')">
-                  ▶ VER CANAL EN VIVO
-                </button>
+                <div style="display:flex;gap:8px;">
+                  <button class="flow-btn-watch" style="flex:1;" onclick="startLivePlayback('${escapeHtml(activeCode)}', '${escapeHtml(activeName)}')">
+                    ▶ VER CANAL EN VIVO
+                  </button>
+                  <button class="flow-pill" onclick="toggleLiveFav('${escapeHtml(activeCode)}', event)">
+                    ${isLiveFav(activeCode) ? "♥" : "♡"}
+                  </button>
+                </div>
               </aside>
             ` : ""}
           </div>
+          `}
         </div>
       `;
     }
 
     function render() {
       const root = document.getElementById("appRoot");
+      if (state.section !== "live" || state.liveTab !== 0) {
+        stopLivePreview();
+      }
       if (state.section === "home") {
         root.innerHTML = renderHome();
       } else if (state.section === "movies") {
@@ -1704,6 +2032,11 @@
         root.innerHTML = renderCatalogGrid("Series", state.series, "series");
       } else if (state.section === "live") {
         root.innerHTML = renderLive();
+        if (state.liveTab === 0 && state.liveChannels.length) {
+          const lastId = localStorage.getItem("mf_web_last_live") || "";
+          const target = state.selectedLiveChannelId || lastId || (state.liveChannels[0].channelCode || state.liveChannels[0].id);
+          if (target) scheduleLivePreview(target);
+        }
       } else if (state.section === "favs") {
         root.innerHTML = renderCatalogGrid("Mi Lista ★", getFavorites(), "all");
       } else if (state.section === "search") {
@@ -2006,6 +2339,10 @@
     window.addEventListener("keydown", (ev) => {
       const modal = document.getElementById("playerModal");
       if (!modal || !modal.classList.contains("open")) return;
+      if (activePlayer.isLive) {
+        if (ev.key === "ArrowUp") { ev.preventDefault(); zapLiveChannel(1); return; }
+        if (ev.key === "ArrowDown") { ev.preventDefault(); zapLiveChannel(-1); return; }
+      }
       if (ev.key === "ArrowRight") { ev.preventDefault(); seekRelative(10); }
       else if (ev.key === "ArrowLeft") { ev.preventDefault(); seekRelative(-10); }
       else if (ev.key === " ") { ev.preventDefault(); togglePlayPause(); }
@@ -2131,10 +2468,13 @@
     async function startVodPlayback(contentId, seriesId, title, fromStart) {
       closeDetail();
       destroyActivePlayers();
+      stopLivePreview();
       const modal = document.getElementById("playerModal");
       modal.classList.add("open");
       document.getElementById("playerTitle").textContent = title || "Cargando...";
       document.getElementById("playerVodControls").style.display = "flex";
+      document.getElementById("playerLiveControls").style.display = "none";
+      document.getElementById("videoEl").style.objectFit = "contain";
       document.getElementById("nfCenterControls").style.display = "flex";
       document.getElementById("nfBottomBar").style.display = "flex";
       showPlayerOverlay();
@@ -2175,23 +2515,84 @@
       }
     }
 
-    async function startLivePlayback(code, name) {
+    let liveZoomCover = false;
+    function updateLiveFavBtn() {
+      const btn = document.getElementById("btnLiveFav");
+      if (btn && activePlayer.liveCode) {
+        const fav = isLiveFav(activePlayer.liveCode);
+        btn.textContent = fav ? "♥ Fav" : "♡ Fav";
+        btn.classList.toggle("active", fav);
+      }
+    }
+    function toggleActiveLiveFav() {
+      if (activePlayer.liveCode) toggleLiveFav(activePlayer.liveCode);
+    }
+    function toggleLiveZoom() {
+      liveZoomCover = !liveZoomCover;
+      const v = document.getElementById("videoEl");
+      if (v) v.style.objectFit = liveZoomCover ? "cover" : "contain";
+      const btn = document.getElementById("btnLiveZoom");
+      if (btn) {
+        btn.textContent = liveZoomCover ? "Zoom: Llenar" : "Zoom: Ajustar";
+        btn.classList.toggle("active", liveZoomCover);
+      }
+    }
+    function zapLiveChannel(delta) {
+      if (!activePlayer.isLive || !state.liveChannels.length) return;
+      const idx = state.liveChannels.findIndex(c => (c.channelCode || c.id) === activePlayer.liveCode);
+      const nextIdx = ((idx < 0 ? 0 : idx) + delta + state.liveChannels.length) % state.liveChannels.length;
+      const ch = state.liveChannels[nextIdx];
+      startLivePlayback(ch.channelCode || ch.id, ch.name || ch.title || "Canal");
+    }
+    function findWebBackupChannel(failedCode, failedName, excluded) {
+      const norm = s => String(s || "").toLowerCase().replace(/\([^)]*\)|\[[^\]]*\]|[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+      const target = norm(failedName);
+      if (!target) return null;
+      let best = null, bestScore = 0;
+      for (const ch of state.liveChannels) {
+        const code = ch.channelCode || ch.id;
+        if (code === failedCode || excluded.has(code)) continue;
+        const cand = norm(ch.name || ch.title);
+        let score = 0;
+        if (cand === target) score = 100;
+        else if (cand.startsWith(target) || target.startsWith(cand)) score = 80;
+        if (score > bestScore) { bestScore = score; best = ch; if (score === 100) break; }
+      }
+      return best;
+    }
+
+    async function startLivePlayback(code, name, failedSet) {
       destroyActivePlayers();
+      stopLivePreview();
       const modal = document.getElementById("playerModal");
       modal.classList.add("open");
+      localStorage.setItem("mf_web_last_live", String(code));
+      activePlayer.liveCode = String(code);
+      activePlayer.liveName = String(name);
+      const excluded = failedSet || new Set();
+
       document.getElementById("playerTitle").textContent = "EN VIVO • " + name;
       document.getElementById("playerVodControls").style.display = "none";
+      document.getElementById("playerLiveControls").style.display = "flex";
       document.getElementById("nfCenterControls").style.display = "none";
       document.getElementById("nfBottomBar").style.display = "none";
       document.getElementById("trackPanel").classList.remove("open");
       document.getElementById("subOverlay").style.display = "none";
       activePlayer.isLive = true;
+      updateLiveFavBtn();
 
       try {
-        const pb = await apiGet(`/api/resolve-live?code=${encodeURIComponent(code)}`);
+        const chObj = state.liveChannels.find(c => String(c.channelCode || c.id) === String(code));
+        let fullLiveUrl = "";
+        if (chObj && chObj.streamUrl && /^https?:\/\//i.test(chObj.streamUrl)) {
+          fullLiveUrl = chObj.streamUrl;
+        } else {
+          const pb = await apiGet(`/api/resolve-live?code=${encodeURIComponent(code)}`);
+          fullLiveUrl = pb.streamUrl.startsWith("http") ? pb.streamUrl : (API_BASE + pb.streamUrl);
+        }
         const video = document.getElementById("videoEl");
         video.controls = true;
-        const fullLiveUrl = pb.streamUrl.startsWith("http") ? pb.streamUrl : (API_BASE + pb.streamUrl);
+        video.style.objectFit = liveZoomCover ? "cover" : "contain";
         if (window.Hls && Hls.isSupported()) {
           const hls = new Hls({ enableWorker: false, lowLatencyMode: false });
           activePlayer.hlsPlayer = hls;
@@ -2200,8 +2601,16 @@
           hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
           hls.on(Hls.Events.ERROR, (ev, data) => {
             if (data && data.fatal) {
-              if (data.type === Hls.ErrorTypes.NETWORK_ERROR) hls.startLoad();
-              else if (data.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+              if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+                hls.recoverMediaError();
+              } else if (excluded.size < 3) {
+                excluded.add(String(code));
+                const backup = findWebBackupChannel(String(code), name, excluded);
+                if (backup) {
+                  showSeekToast("Respaldo: " + (backup.name || backup.title));
+                  startLivePlayback(backup.channelCode || backup.id, backup.name || backup.title, excluded);
+                }
+              }
             }
           });
         } else {

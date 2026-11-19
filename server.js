@@ -10,19 +10,6 @@ const dnsx = require("./dnsx.js");
 
 const PORT = process.env.PORT || 3080;
 
-// Seed session from bundled seeds.json for instant startup
-try {
-  const seedsData = JSON.parse(fs.readFileSync(path.join(__dirname, "seeds.json"), "utf8"));
-  if (seedsData && Array.isArray(seedsData.seeds) && seedsData.seeds.length > 0) {
-    const s = seedsData.seeds[0];
-    magis.session.sn = s.sn;
-    magis.session.userId = s.userId;
-    magis.session.userToken = s.userToken;
-    magis.session.ready = true;
-    magis.session.at = Date.now();
-  }
-} catch (_) {}
-
 const streamTokens = new Map();
 
 function registerStream(targetUrl, headers, isLive, extra) {
@@ -581,15 +568,25 @@ try {
     });
   }
 
-  // API: Configure Manual HTTP Proxy (standard user-provided proxy for Web & Roku)
-  if (pathname === "/api/manual-proxy" && req.method === "POST") {
-    return readJsonBody(req, (err, data) => {
-      if (err) return sendJson(res, 400, { error: "JSON inválido" });
-      const proxyUrl = String(data.proxyUrl || "").trim();
+  // API: Configure Manual HTTP Proxy (GET or POST, shared for Web & Roku)
+  if (pathname === "/api/manual-proxy") {
+    if (req.method === "GET") {
+      const proxyUrl = String(parsed.query.proxyUrl || "").trim();
       magis.setManualProxy(proxyUrl);
       saveProxyConfig(proxyUrl);
-      sendJson(res, 200, { ok: true, manualProxyUrl: proxyUrl });
-    });
+      magis.ensureSession(() => {});
+      return sendJson(res, 200, { ok: true, manualProxyUrl: proxyUrl });
+    }
+    if (req.method === "POST") {
+      return readJsonBody(req, (err, data) => {
+        if (err) return sendJson(res, 400, { error: "JSON inválido" });
+        const proxyUrl = String(data.proxyUrl || "").trim();
+        magis.setManualProxy(proxyUrl);
+        saveProxyConfig(proxyUrl);
+        magis.ensureSession(() => {});
+        sendJson(res, 200, { ok: true, manualProxyUrl: proxyUrl });
+      });
+    }
   }
 
   // API: Test Manual HTTP Proxy connectivity (CONNECT / TCP latency check)
@@ -951,4 +948,13 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`====================================================`);
   console.log(`  MARIANFLIX WEB ACTIVO EN: http://localhost:${PORT}`);
   console.log(`====================================================`);
+  // Auto-activate portal session on boot (uses direct v8/active on Render/US, or seeds/manual proxy)
+  setTimeout(() => {
+    try {
+      magis.ensureSession((err, sess) => {
+        if (err) console.log("[boot] sesión inicial pendiente:", err.message);
+        else console.log("[boot] sesión VOD activada automáticamente (sn=" + String((sess && sess.sn) || "").slice(0, 12) + ")");
+      });
+    } catch (_) {}
+  }, 500);
 });

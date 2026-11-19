@@ -1210,7 +1210,8 @@
       "Suspenso", "Aventura", "Romance", "Familia", "Crimen", "Fantasía",
       "Misterio", "Animación", "Biografía", "Historia", "Documental"
     ];
-    const API_BASE = location.protocol === "file:" ? "http://localhost:3080" : "";
+    const IS_STATIC_HOST = (location.protocol === "file:" || location.hostname.endsWith(".github.io"));
+    let API_BASE = localStorage.getItem("mf_web_api_base") || (IS_STATIC_HOST ? "http://localhost:3080" : "");
     const NOW_MONTH_PREFIX = (() => {
       const d = new Date();
       const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -1340,14 +1341,43 @@
       return h > 0 ? `${h}:${pad(m)}:${pad(r)}` : `${pad(m)}:${pad(r)}`;
     }
 
+    async function parseJsonSafe(res) {
+      const txt = await res.text();
+      if (/^\s*</.test(txt)) {
+        throw new Error("El servidor devolvió HTML en lugar de API JSON. Asegurate de tener corriendo server.js (Iniciar_Marianflix_Web.bat) y configurada su URL en Ajustes.");
+      }
+      let data = {};
+      try { data = JSON.parse(txt || "{}"); } catch (_) {
+        throw new Error("Respuesta no válida del servidor.");
+      }
+      if (!res.ok) throw new Error(data.error || ("HTTP " + res.status));
+      return data;
+    }
+
     async function apiGet(path, timeoutMs = 8000) {
       const url = path.startsWith("http") ? path : (API_BASE + path);
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), timeoutMs);
       try {
         const res = await fetch(url, { signal: ctrl.signal });
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        return await res.json();
+        return await parseJsonSafe(res);
+      } finally {
+        clearTimeout(t);
+      }
+    }
+
+    async function apiPost(path, bodyObj, timeoutMs = 12000) {
+      const url = path.startsWith("http") ? path : (API_BASE + path);
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(bodyObj || {}),
+          signal: ctrl.signal
+        });
+        return await parseJsonSafe(res);
       } finally {
         clearTimeout(t);
       }
@@ -2239,13 +2269,12 @@
       const btn = document.getElementById("btnRefreshSeeds");
       if (btn) btn.textContent = "Actualizando sesiones...";
       try {
-        const res = await fetch(API_BASE + "/api/refresh-seeds", { method: "POST" });
-        const data = await res.json();
+        const data = await apiPost("/api/refresh-seeds", {}, 15000);
         const st = await apiGet("/api/session-status", 4000).catch(() => null);
         if (st) state.sessionStatus = st;
         alert(data.ready ? "Sesión VOD renovada y activa en Web y Roku." : "Pool actualizado (aún esperando nuevas sesiones válidas del portal).");
       } catch (e) {
-        alert("No se pudo conectar al servidor local.");
+        alert("Error: " + e.message);
       }
       render();
     }
@@ -2254,13 +2283,7 @@
       const inp = document.getElementById("inpCustomM3u");
       const m3uUrl = inp ? inp.value.trim() : "";
       try {
-        const res = await fetch(API_BASE + "/api/custom-vod", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ m3uUrl })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Error al cargar M3U");
+        const data = await apiPost("/api/custom-vod", { m3uUrl }, 15000);
         state.customVod = data.items || [];
         state.customM3uUrl = data.m3uUrl || "";
         alert(m3uUrl ? `Lista VOD cargada: ${state.customVod.length} títulos listos en Web y Roku.` : "Lista VOD propia limpiada.");
@@ -2270,6 +2293,17 @@
       }
     }
 
+    function saveBackendApiBase(resetDefault) {
+      const inp = document.getElementById("inpBackendUrl");
+      let next = resetDefault ? (IS_STATIC_HOST ? "http://localhost:3080" : "") : (inp ? inp.value.trim().replace(/\/+$/, "") : "");
+      if (next) localStorage.setItem("mf_web_api_base", next);
+      else localStorage.removeItem("mf_web_api_base");
+      API_BASE = next;
+      alert(next ? ("Servidor configurado: " + next) : "Usando servidor del mismo origen.");
+      initCatalog();
+      render();
+    }
+
     async function testManualProxyUrl() {
       const inp = document.getElementById("inpManualProxy");
       const btn = document.getElementById("btnTestProxy");
@@ -2277,12 +2311,7 @@
       if (!proxyUrl) return alert("Ingresá primero un proxy (ej: http://host:puerto).");
       if (btn) btn.textContent = "Probando...";
       try {
-        const res = await fetch(API_BASE + "/api/test-proxy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ proxyUrl })
-        });
-        const data = await res.json();
+        const data = await apiPost("/api/test-proxy", { proxyUrl }, 10000);
         alert(data.ok ? ("✓ " + data.message) : ("✗ " + (data.message || data.error || "Proxy sin respuesta")));
       } catch (e) {
         alert("✗ Error al probar proxy: " + e.message);
@@ -2294,13 +2323,7 @@
       const inp = document.getElementById("inpManualProxy");
       const proxyUrl = clearIt ? "" : (inp ? inp.value.trim() : "");
       try {
-        const res = await fetch(API_BASE + "/api/manual-proxy", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ proxyUrl })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Error al guardar proxy");
+        const data = await apiPost("/api/manual-proxy", { proxyUrl }, 10000);
         state.sessionStatus = Object.assign({}, state.sessionStatus, { manualProxyUrl: data.manualProxyUrl || "" });
         alert(proxyUrl ? `Proxy manual guardado (${proxyUrl}) para Web y Roku.` : "Proxy manual desactivado (conexión directa).");
         render();
@@ -2314,13 +2337,7 @@
       const userId = (document.getElementById("inpManualUid") || {}).value || "";
       const userToken = (document.getElementById("inpManualTok") || {}).value || "";
       try {
-        const res = await fetch(API_BASE + "/api/manual-session", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ sn: sn.trim(), userId: userId.trim(), userToken: userToken.trim() })
-        });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Datos incompletos");
+        await apiPost("/api/manual-session", { sn: sn.trim(), userId: userId.trim(), userToken: userToken.trim() }, 10000);
         state.sessionStatus = { ready: true, lastError: "" };
         alert("Sesión VOD activada para Web y Roku.");
         initCatalog();
@@ -2349,6 +2366,13 @@
               <div style="font-size:12px;color:#b8b8c8;">Películas: ${state.movies.length} • Series: ${state.series.length} • TV en Vivo: ${state.liveChannels.length} • Lista VOD Propia: ${state.customVod.length}</div>
               <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">
                 <button id="btnRefreshSeeds" class="pill active" onclick="refreshVodSeedsNow()">🔄 Actualizar sesiones VOD ahora</button>
+              </div>
+              <div style="margin-top:8px;padding-top:8px;border-top:1px solid #262636;display:flex;flex-direction:column;gap:6px;">
+                <div style="font-size:12px;color:#b8b8c8;">URL del Servidor Node.js (server.js — necesario si abrís desde GitHub Pages):</div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  <input id="inpBackendUrl" type="text" class="search-input" style="flex:1;min-width:220px;" placeholder="http://localhost:3080 o https://tu-servidor" value="${escapeHtml(API_BASE)}" />
+                  <button class="pill" onclick="saveBackendApiBase(false)">Conectar Servidor</button>
+                </div>
               </div>
             </div>
 

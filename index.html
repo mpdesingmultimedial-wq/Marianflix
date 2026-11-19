@@ -1228,6 +1228,7 @@
       series: [],
       liveCategories: [],
       liveChannels: [],
+      allLiveChannels: [],
       liveLoadedFromApi: false,
       selectedLiveCat: "__ALL_MERGED__",
       liveTab: 0,
@@ -1396,7 +1397,37 @@
           .map(c => ({ id: String(c.id), name: c.name === "ChannelList" ? "Portal Todos" : c.name }))
       ];
       state.liveChannels = SNAP.liveChannels || [];
+      state.allLiveChannels = [...state.liveChannels];
       render();
+
+      // Load static live_channels.json (3,537 Mariantv_plus channels) so GitHub Pages & offline mode always have Argentina, Deportes, etc.
+      fetch("live_channels.json").then(r => r.ok ? r.json() : null).then(arr => {
+        if (Array.isArray(arr) && arr.length) {
+          const normalized = arr.filter(c => c && c.id && c.streamUrl).map((c, idx) => ({
+            channelCode: String(c.id),
+            id: String(c.id),
+            index: c.channelNumber || (101 + idx),
+            number: c.channelNumber || (101 + idx),
+            name: String(c.title || ("Canal " + (101 + idx))),
+            title: String(c.title || ("Canal " + (101 + idx))),
+            category: String(c.category || "Argentina"),
+            logo: String(c.posterUrl || ""),
+            poster: String(c.posterUrl || ""),
+            streamUrl: String(c.streamUrl || "")
+          }));
+          const seen = new Set(normalized.map(x => x.channelCode));
+          const merged = [...normalized];
+          (SNAP.liveChannels || []).forEach(p => {
+            const code = String(p.channelCode || p.id || "");
+            if (code && !seen.has(code)) { seen.add(code); merged.push(p); }
+          });
+          state.allLiveChannels = merged;
+          if (!state.liveLoadedFromApi) {
+            state.liveChannels = filterLiveLocal(state.selectedLiveCat, merged);
+            render();
+          }
+        }
+      }).catch(() => {});
 
       // Fire each endpoint independently so fast TV/Argentina updates render IMMEDIATELY without waiting for VOD!
       apiGet("/api/live-categories", 5000).then(cRes => {
@@ -1417,7 +1448,8 @@
 
       apiGet("/api/live-channels?columnId=__ALL_MERGED__", 6000).then(chRes => {
         if (chRes && Array.isArray(chRes.channels) && chRes.channels.length) {
-          state.liveChannels = chRes.channels;
+          state.allLiveChannels = chRes.channels;
+          state.liveChannels = filterLiveLocal(state.selectedLiveCat, chRes.channels);
           state.liveLoadedFromApi = true;
           render();
         }
@@ -1489,12 +1521,37 @@
       }
     }
 
+    function filterLiveLocal(colId, pool) {
+      const list = Array.isArray(pool) ? pool : state.allLiveChannels;
+      const cid = String(colId || "__ALL_MERGED__");
+      if (cid === "__ALL_MERGED__" || cid === "__MARIANTV__" || cid === "76182") return list;
+      if (cid === "__ARGENTINA__") {
+        return list.filter(c => /argentina/i.test(String(c.category || "")) || /\b(telefe|el trece|eltrece|tn|c5n|a24|cronica|crónica|américa tv|america tv|canal 9|tv pública|tyc|net tv|canal 26)\b/i.test(String(c.name || c.title || "")));
+      }
+      if (cid.startsWith("__LOCAL_CAT__:")) {
+        const target = cid.slice("__LOCAL_CAT__:".length).toLowerCase();
+        return list.filter(c => String(c.category || "").toLowerCase() === target);
+      }
+      const catObj = (state.liveCategories || []).find(x => String(x.id) === cid);
+      const catName = catObj ? String(catObj.name || "").replace(/\s*\(Portal\)$/i, "").trim().toLowerCase() : "";
+      if (catName) {
+        const byCat = list.filter(c => String(c.category || "").toLowerCase().includes(catName) || String(c.name || c.title || "").toLowerCase().includes(catName));
+        if (byCat.length) return byCat;
+      }
+      return list;
+    }
+
     async function loadLiveCategory(colId) {
-      state.selectedLiveCat = String(colId);
+      const cid = String(colId);
+      state.selectedLiveCat = cid;
+      // Immediately update visible channels from local pool (works offline & on GitHub Pages!)
+      if (state.allLiveChannels.length) {
+        state.liveChannels = filterLiveLocal(cid, state.allLiveChannels);
+      }
       render();
       try {
-        const data = await apiGet(`/api/live-channels?columnId=${encodeURIComponent(colId)}`);
-        if (data.channels) {
+        const data = await apiGet(`/api/live-channels?columnId=${encodeURIComponent(cid)}`, 5000);
+        if (data && Array.isArray(data.channels) && data.channels.length && state.selectedLiveCat === cid) {
           state.liveChannels = data.channels;
           state.liveLoadedFromApi = true;
           render();

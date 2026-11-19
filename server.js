@@ -466,8 +466,23 @@ try {
   if (pathname === "/api/live-channels") {
     const rawCol = String(parsed.query.columnId || "__ALL_MERGED__");
     if (rawCol === "__ARGENTINA__") {
-      return sendJson(res, 200, {
-        channels: localTvPlusChannels.filter(c => c.category.toLowerCase() === "argentina")
+      const localArg = localTvPlusChannels.filter(c => c.category.toLowerCase() === "argentina");
+      return magis.getLiveChannels(76182, 1, 250, (err, chs) => {
+        const portalList = Array.isArray(chs) ? chs : [];
+        const argRe = /\b(arg|argentina|telefe|el trece|eltrece|tn|c5n|tyc|america tv|américa|canal 9|elnueve|tv publica|tv pública|a24|cronica|crónica|ciudad magazine|volver|net tv|canal 26|deportv|tnt sports|espn premium|encuentro|pakapaka)\b/i;
+        const out = [...localArg];
+        const seen = new Set(out.map(c => c.channelCode));
+        let nextNum = out.reduce((m, c) => Math.max(m, c.number || 100), 100) + 1;
+        portalList.forEach(p => {
+          const code = String(p.channelCode || p.id || "");
+          const nm = String(p.name || p.title || "");
+          if (code && !seen.has(code) && argRe.test(nm)) {
+            seen.add(code);
+            out.push(Object.assign({}, p, { category: "Argentina", index: nextNum, number: nextNum }));
+            nextNum++;
+          }
+        });
+        return sendJson(res, 200, { channels: out });
       });
     }
     if (rawCol === "__MARIANTV__") {

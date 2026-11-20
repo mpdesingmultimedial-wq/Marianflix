@@ -1371,6 +1371,9 @@
       try {
         const res = await fetch(url, { signal: ctrl.signal });
         return await parseJsonSafe(res);
+      } catch (e) {
+        if (e && e.name === "AbortError") throw new Error("Tiempo de espera agotado conectando al servidor");
+        throw e;
       } finally {
         clearTimeout(t);
       }
@@ -1388,6 +1391,9 @@
           signal: ctrl.signal
         });
         return await parseJsonSafe(res);
+      } catch (e) {
+        if (e && e.name === "AbortError") throw new Error("Tiempo de espera agotado conectando al servidor");
+        throw e;
       } finally {
         clearTimeout(t);
       }
@@ -2335,10 +2341,10 @@
       const btn = document.getElementById("btnRefreshSeeds");
       if (btn) btn.textContent = "Actualizando sesiones...";
       try {
-        const data = await apiPost("/api/refresh-seeds", {}, 15000);
+        const data = await apiPost("/api/refresh-seeds", {}, 20000);
         const st = await apiGet("/api/session-status", 4000).catch(() => null);
         if (st) state.sessionStatus = st;
-        alert(data.ready ? "Sesión VOD renovada y activa en Web y Roku." : "Pool actualizado (aún esperando nuevas sesiones válidas del portal).");
+        alert(data.ready ? "Sesión VOD renovada y activa en Web y Roku." : ("Portal VOD no disponible todavía: " + (data.error || "esperando renovación de sesiones")));
       } catch (e) {
         alert("Error: " + e.message);
       }

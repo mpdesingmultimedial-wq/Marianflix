@@ -622,15 +622,26 @@ try {
     });
   }
 
-  // API: Force Refresh Seeds now (GET or POST so Roku & Web can both trigger it)
+  // API: Force Refresh Seeds now (GET or POST, bounded 8s timeout so browser never hits AbortError)
   if (pathname === "/api/refresh-seeds") {
-    return magis.forceRefreshSeeds((err) => {
+    let sent = false;
+    const finish = (err) => {
+      if (sent) return;
+      sent = true;
+      const lastErr = (err && err.message) || (magis.session && magis.session.lastError) || "";
+      const hasFatalErr = /portal100024|portal200001|aaa100027|aaa100028|socket hang up|timeout|sin semilla|rechaz/i.test(lastErr);
+      const isReady = !err && !!(magis.session && magis.session.ready && !hasFatalErr);
       sendJson(res, 200, {
-        ok: !err && !!(magis.session && magis.session.ready),
-        ready: !!(magis.session && magis.session.ready),
-        error: err ? err.message : "",
+        ok: isReady,
+        ready: isReady,
+        error: lastErr,
         seedStatus: magis.seedStatus ? magis.seedStatus() : {}
       });
+    };
+    const timer = setTimeout(() => finish(new Error((magis.session && magis.session.lastError) || "Tiempo de espera agotado conectando al portal")), 14000);
+    return magis.forceRefreshSeeds((err) => {
+      clearTimeout(timer);
+      finish(err);
     });
   }
 

@@ -11,19 +11,19 @@ var crypto = require("crypto"),
   manualProxyUrl = "",
   KEY_HEX = "e7af1ed7de1ffddd7bd3fe37ebdffde9ef3fe1ae39edfeb8",
   HOSTS = [
-    "mptec.dhkrxuzcy.com",
+    "osuhk.m3x8o50te.com",
+    "oogoy.f30c96w8.com",
+    "hinumz.a878kkoyc.com",
     "ftmrmy.jdfey0cd.com",
     "fuxok.nguvmqhpk.com",
     "eajmnp.hcgv1dt8.com",
-    "hinumz.a878kkoyc.com",
     "krdwvd.swcaw7qx.com",
-    "osuhk.m3x8o50te.com",
-    "oogoy.f30c96w8.com",
+    "mptec.dhkrxuzcy.com",
   ],
   PORTAL_CODE = "masnew",
   APP_ID = "com.android.msandroid",
   APK_VERSION = "49902",
-  SPKG_VER = "2024-09-10 06:25:30_33_13_",
+  SPKG_VER = "2025-08-07 05:40:11_36_16_",
   APK_VER_HEADER = "43404",
   USER_AGENT = "okhttp/3.12.12",
   CONTENT_TYPE = "application/json;charset=utf-8",
@@ -58,7 +58,6 @@ var crypto = require("crypto"),
     aaa100080: 1,
     aaa100082: 1,
     aaa100083: 1,
-    portal200001: 1,
   },
   SESSION_MAX_AGE_MS = 216e5,
   ROOT_CODES = {
@@ -88,7 +87,7 @@ var crypto = require("crypto"),
     reserve1: FIXED_RESERVE1,
     deviceToken: "",
     drmId: FIXED_DRM_ID,
-    sdkVer: 33,
+    sdkVer: 36,
   },
   FINGERPRINT_FIXED = {
     board: "goldfish_arm64",
@@ -292,7 +291,8 @@ function post(e, r, t) {
   } catch (r) {
     return t(new Error(e + ": error cifrando cuerpo: " + r.message));
   }
-  var s = hostOrder(),
+  var baseHosts = hostOrder(),
+    s = baseHosts.concat(baseHosts.slice(0, 6)),
     a = 0,
     o = 0,
     i = !1,
@@ -310,9 +310,10 @@ function post(e, r, t) {
     }
   }
   function f() {
-    i ||
-      a < s.length ||
-      (o <= 0 && c(l || new Error(e + ": el portal no respondió")));
+    if (i) return;
+    if (o <= 0 && a < s.length) return void p();
+    if (a >= s.length && o <= 0)
+      c(l || new Error(e + ": el portal no respondió"));
   }
   function openViaManualProxy(targetHost, targetPort, isHttp, reqOpts, onReqReady, onErr) {
     var p;
@@ -428,15 +429,6 @@ function post(e, r, t) {
                       )
                     );
                   }
-                  ((preferredHost = r),
-                    a &&
-                      console.log(
-                        "[magis] portal respondió por HTTP plano en " +
-                          r +
-                          " (TLS/SNI filtrado por el operador)"
-                      ));
-                  var pos = HOSTS.indexOf(r);
-                  pos > 0 && (HOSTS.splice(pos, 1), HOSTS.unshift(r));
                   var u =
                     void 0 === s.returnCode || null === s.returnCode
                       ? ""
@@ -446,6 +438,21 @@ function post(e, r, t) {
                       e + " -> " + u + " " + text(s.errorMessage)
                     );
                     d.portalCode = u;
+                    /* portal200001 intermitente en algunos nodos del balanceador:
+                       NO invalida la sesión ni aborta la llamada; se rota de nodo/host
+                       para alcanzar un nodo sano del pool (Xuper 3.1.0). */
+                    if ("portal200001" === u) {
+                      console.log(
+                        "[magis] " +
+                          e +
+                          ": nodo devolvió portal200001 en " +
+                          r +
+                          ", reintentando en otro nodo/host..."
+                      );
+                      g(d);
+                      if (!i && a < s.length) setTimeout(p, 120);
+                      return;
+                    }
                     /* Bloqueo regional (portal100024): se basa en la IP del
                        cliente (Chile, etc.); todos los hosts del portal
                        responderán lo mismo. Retornar de inmediato para pasar
@@ -466,6 +473,15 @@ function post(e, r, t) {
                     }
                     return c(d);
                   }
+                  ((preferredHost = r),
+                    a &&
+                      console.log(
+                        "[magis] portal respondió por HTTP plano en " +
+                          r +
+                          " (TLS/SNI filtrado por el operador)"
+                      ));
+                  var pos = HOSTS.indexOf(r);
+                  pos > 0 && (HOSTS.splice(pos, 1), HOSTS.unshift(r));
                   if ("string" == typeof s.data && "" !== s.data) {
                     var f, p;
                     try {
@@ -1521,7 +1537,7 @@ function slbBean() {
     encMediaSupported: 1,
     liveCodeList: ["masnew_live"],
     appParams: "",
-    reserve1: FIXED_RESERVE1,
+    reserve1: FIXED_MAC,
     pipFlag: "0",
   };
 }
@@ -1536,10 +1552,7 @@ function isCfl(e) {
 }
 function withScheme(e) {
   var r = trim(e).replace(/\/+$/, "");
-  return (
-    (r = r.replace(/^http:\/\//i, "https://")),
-    /^https:\/\//.test(r) ? r : "https://" + r
-  );
+  return /^https?:\/\//i.test(r) ? r : "https://" + r;
 }
 function vodCdns(e) {
   var r = [],
@@ -1589,8 +1602,8 @@ function getSlb(e) {
     return e(null, slbCache.slb);
   firstCall(
     [
-      { path: "v15/getSlbInfo", bean: slbBean() },
       { path: "v14/getSlbInfo", bean: slbBean() },
+      { path: "v15/getSlbInfo", bean: slbBean() },
     ],
     function (r, t) {
       return r
@@ -2303,7 +2316,7 @@ function resolveLive(e, r, force) {
         a = n.license,
         o = slbBean();
       o.liveCodeList = ["masnew_live"];
-      var i = ["v15/getSlbInfo", "v14/getSlbInfo"],
+      var i = ["v14/getSlbInfo", "v15/getSlbInfo"],
         l = 0;
       !(function t(u) {
         if (l >= i.length)

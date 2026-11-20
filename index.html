@@ -1211,7 +1211,16 @@
       "Misterio", "Animación", "Biografía", "Historia", "Documental"
     ];
     const IS_STATIC_HOST = (location.protocol === "file:" || location.hostname.endsWith(".github.io"));
-    let API_BASE = localStorage.getItem("mf_web_api_base") || (IS_STATIC_HOST ? "http://localhost:3080" : "");
+    const DEFAULT_CLOUD_API = "https://marianflix.onrender.com";
+    let API_BASE = (() => {
+      const saved = (localStorage.getItem("mf_web_api_base") || "").trim();
+      // Never allow proxy URLs with credentials (user:pass@host) as API_BASE, and always use same-origin on Render/Node
+      if (saved.includes("@") || !IS_STATIC_HOST) {
+        if (saved.includes("@")) localStorage.removeItem("mf_web_api_base");
+        return "";
+      }
+      return saved || (location.hostname.endsWith(".github.io") ? DEFAULT_CLOUD_API : "http://localhost:3080");
+    })();
     const NOW_MONTH_PREFIX = (() => {
       const d = new Date();
       const mm = String(d.getMonth() + 1).padStart(2, "0");
@@ -2352,7 +2361,11 @@
 
     function saveBackendApiBase(resetDefault) {
       const inp = document.getElementById("inpBackendUrl");
-      let next = resetDefault ? (IS_STATIC_HOST ? "http://localhost:3080" : "") : (inp ? inp.value.trim().replace(/\/+$/, "") : "");
+      let next = resetDefault ? (location.hostname.endsWith(".github.io") ? DEFAULT_CLOUD_API : "") : (inp ? inp.value.trim().replace(/\/+$/, "") : "");
+      if (next.includes("@")) {
+        alert("Esa URL tiene usuario:clave@host (es un Proxy HTTP). Pegala abajo en 'Proxy HTTP Manual', no en 'URL del Servidor Node.js'.");
+        return;
+      }
       if (next) localStorage.setItem("mf_web_api_base", next);
       else localStorage.removeItem("mf_web_api_base");
       API_BASE = next;
@@ -2424,13 +2437,15 @@
               <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:4px;">
                 <button id="btnRefreshSeeds" class="pill active" onclick="refreshVodSeedsNow()">🔄 Actualizar sesiones VOD ahora</button>
               </div>
+              ${IS_STATIC_HOST ? `
               <div style="margin-top:8px;padding-top:8px;border-top:1px solid #262636;display:flex;flex-direction:column;gap:6px;">
-                <div style="font-size:12px;color:#b8b8c8;">URL del Servidor Node.js (server.js — necesario si abrís desde GitHub Pages):</div>
+                <div style="font-size:12px;color:#b8b8c8;">URL del Servidor Node.js (por defecto: ${DEFAULT_CLOUD_API} — no pegar proxys acá):</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;">
-                  <input id="inpBackendUrl" type="text" class="search-input" style="flex:1;min-width:220px;" placeholder="http://localhost:3080 o https://tu-servidor" value="${escapeHtml(API_BASE)}" />
+                  <input id="inpBackendUrl" type="text" class="search-input" style="flex:1;min-width:220px;" placeholder="https://marianflix.onrender.com" value="${escapeHtml(API_BASE)}" />
                   <button class="pill" onclick="saveBackendApiBase(false)">Conectar Servidor</button>
+                  <button class="pill" onclick="saveBackendApiBase(true)">Usar Render</button>
                 </div>
-              </div>
+              </div>` : ""}
             </div>
 
             <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">

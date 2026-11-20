@@ -555,7 +555,7 @@ try {
   if (pathname === "/api/session-status") {
     const st = magis.seedStatus ? magis.seedStatus() : {};
     const lastErr = (magis.session && magis.session.lastError) || "";
-    const hasFatalErr = /portal100024|aaa100027|aaa100028|socket hang up|timeout|sin semilla|rechaz/i.test(lastErr);
+    const hasFatalErr = /portal100024|portal200001|aaa100027|aaa100028|socket hang up|timeout|sin semilla|rechaz/i.test(lastErr);
     const isActuallyReady = !!(magis.session && magis.session.ready && !hasFatalErr);
     return sendJson(res, 200, {
       ready: isActuallyReady,

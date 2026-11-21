@@ -599,6 +599,43 @@
       gap: 12px;
       z-index: 5;
     }
+    .player-res-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: #142824;
+      border: 1px solid #00e5b4;
+      color: #00e5b4;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .player-enh-badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: #2b220e;
+      border: 1px solid #ffd54f;
+      color: #ffd54f;
+      font-size: 11px;
+      font-weight: 800;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    #videoEl.mf-enhance-hd_plus {
+      filter: url(#mfEnhanceHdPlus) contrast(1.06) saturate(1.10) brightness(1.02);
+      image-rendering: high-quality;
+    }
+    #videoEl.mf-enhance-ultra {
+      filter: url(#mfEnhanceUltra) contrast(1.10) saturate(1.16) brightness(1.03);
+      image-rendering: high-quality;
+    }
+    #videoEl.mf-enhance-off {
+      filter: none;
+    }
     .player-video-wrap {
       position: relative;
       flex: 1;
@@ -1153,14 +1190,31 @@
     </div>
   </div>
 
+  <!-- GPU SVG Sharpening Filters for Video Enhancement (Series & Movies) -->
+  <svg width="0" height="0" style="position:absolute;width:0;height:0;pointer-events:none;" aria-hidden="true">
+    <defs>
+      <filter id="mfEnhanceHdPlus" color-interpolation-filters="sRGB">
+        <feConvolveMatrix order="3" preserveAlpha="true" divisor="1"
+          kernelMatrix="0 -0.25 0  -0.25 2.0 -0.25  0 -0.25 0" />
+      </filter>
+      <filter id="mfEnhanceUltra" color-interpolation-filters="sRGB">
+        <feConvolveMatrix order="3" preserveAlpha="true" divisor="1"
+          kernelMatrix="0 -0.48 0  -0.48 2.92 -0.48  0 -0.48 0" />
+      </filter>
+    </defs>
+  </svg>
+
   <!-- Video Player Modal -->
   <div class="player-modal" id="playerModal">
     <div class="player-topbar">
-      <div style="display:flex;align-items:center;gap:12px;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:10px;overflow:hidden;">
         <button class="pill" onclick="closePlayer()">← Volver</button>
         <strong id="playerTitle" style="font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Reproduciendo</strong>
+        <span class="player-res-badge" id="playerRealResBadge" style="display:none;"></span>
+        <span class="player-enh-badge" id="playerEnhBadge" style="display:none;"></span>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;" id="playerVodControls">
+        <button class="pill" id="btnEnhanceMenu" onclick="cycleVideoEnhanceMode()" title="Cambiar renderizado de mejora visual">✨ HD+</button>
         <button class="pill" id="btnQualityMenu" onclick="openTrackMenu('quality')">🎬 Calidad</button>
         <button class="pill" id="btnAudioMenu" onclick="openTrackMenu('audio')">🔊 Audio</button>
         <button class="pill" id="btnSubMenu" onclick="openTrackMenu('sub')">💬 Subtítulos</button>
@@ -1299,6 +1353,88 @@
       if (q === "720") return "720p";
       if (q === "480") return "480p";
       return "Auto";
+    }
+    const ENHANCE_OPTIONS = ["hd_plus", "ultra", "off"];
+    function getVideoEnhanceMode() {
+      const m = (localStorage.getItem("mf_web_enhance") || "hd_plus").toLowerCase();
+      return ENHANCE_OPTIONS.includes(m) ? m : "hd_plus";
+    }
+    function setVideoEnhanceMode(mode) {
+      const clean = ENHANCE_OPTIONS.includes(String(mode)) ? String(mode) : "hd_plus";
+      localStorage.setItem("mf_web_enhance", clean);
+      applyWebVideoEnhance();
+      render();
+    }
+    function enhanceLabel(mode) {
+      if (mode === "hd_plus") return "✨ Cine HD+ (Recomendado)";
+      if (mode === "ultra") return "⚡ Ultra Nitidez (4K Sim)";
+      return "Original (Desactivado)";
+    }
+    function enhanceShortLabel(mode) {
+      if (mode === "hd_plus") return "✨ HD+";
+      if (mode === "ultra") return "⚡ Ultra";
+      return "Original";
+    }
+    function formatResolutionShort(h) {
+      if (!h || h <= 0) return "";
+      if (h >= 2000) return "4K";
+      if (h >= 1400) return "2K";
+      if (h >= 1000) return "1080p";
+      if (h >= 700) return "720p";
+      if (h >= 450) return "480p";
+      return h + "p";
+    }
+    function applyWebVideoEnhance() {
+      const video = document.getElementById("videoEl");
+      const enhBadge = document.getElementById("playerEnhBadge");
+      const enhBtn = document.getElementById("btnEnhanceMenu");
+      const mode = activePlayer && activePlayer.isLive ? "off" : getVideoEnhanceMode();
+      if (video) {
+        video.classList.remove("mf-enhance-hd_plus", "mf-enhance-ultra", "mf-enhance-off");
+        video.classList.add("mf-enhance-" + mode);
+      }
+      if (enhBadge) {
+        if (!activePlayer || activePlayer.isLive || mode === "off") {
+          enhBadge.style.display = "none";
+        } else {
+          enhBadge.textContent = enhanceShortLabel(mode);
+          enhBadge.style.display = "inline-flex";
+        }
+      }
+      if (enhBtn) {
+        enhBtn.textContent = enhanceShortLabel(getVideoEnhanceMode());
+        enhBtn.classList.toggle("active", getVideoEnhanceMode() !== "off");
+      }
+    }
+    function cycleVideoEnhanceMode() {
+      const cur = getVideoEnhanceMode();
+      const idx = ENHANCE_OPTIONS.indexOf(cur);
+      const next = ENHANCE_OPTIONS[(idx + 1) % ENHANCE_OPTIONS.length];
+      localStorage.setItem("mf_web_enhance", next);
+      applyWebVideoEnhance();
+      showSeekToast(enhanceLabel(next));
+      const panel = document.getElementById("trackPanel");
+      if (panel && panel.classList.contains("open") && activePlayer.menuMode === "quality") {
+        renderTrackPanel();
+      }
+    }
+    function updateRealVideoResolutionBadge() {
+      const video = document.getElementById("videoEl");
+      const badge = document.getElementById("playerRealResBadge");
+      const w = (video && video.videoWidth) || 0;
+      const h = (video && video.videoHeight) || 0;
+      activePlayer.realVideoWidth = w;
+      activePlayer.realVideoHeight = h;
+      if (badge) {
+        if (h > 0) {
+          const tag = formatResolutionShort(h);
+          badge.textContent = w > 0 ? `${tag} • ${w}×${h}` : tag;
+          badge.style.display = "inline-flex";
+        } else {
+          badge.style.display = "none";
+        }
+      }
+      updateQualityButtonLabels();
     }
 
     function isAdultLockEnabled() {
@@ -2638,6 +2774,19 @@
                   </button>
                 `).join("")}
               </div>
+              <div style="margin-top:8px;padding-top:10px;border-top:1px solid #262636;display:flex;flex-direction:column;gap:8px;">
+                <div style="font-size:14px;font-weight:800;color:#ffd54f;">✨ Renderizado de Mejora Visual (Series y Películas)</div>
+                <div style="font-size:12px;color:#b8b8c8;">
+                  Aplica filtro GPU de nitidez (Unsharp Mask) + contraste y color cinematográfico en tiempo real para que las series y películas 720p se vean mucho más nítidas:
+                </div>
+                <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                  ${ENHANCE_OPTIONS.map(m => `
+                    <button class="pill ${getVideoEnhanceMode()===m?'active':''}" onclick="setVideoEnhanceMode('${m}')">
+                      ${getVideoEnhanceMode()===m ? "✓ " : ""}${enhanceLabel(m)}
+                    </button>
+                  `).join("")}
+                </div>
+              </div>
             </div>
 
             <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
@@ -3086,18 +3235,19 @@
 
     function updateQualityButtonLabels() {
       const qPref = getPreferredQuality();
+      const realTag = formatResolutionShort(activePlayer.realVideoHeight || 0);
       const vodBtn = document.getElementById("btnQualityMenu");
       if (vodBtn) {
-        const curQ = activePlayer.currentQuality || qualityLabel(qPref);
+        const curQ = realTag || activePlayer.currentQuality || qualityShortLabel(qPref);
         vodBtn.textContent = "🎬 " + curQ;
       }
       const liveBtn = document.getElementById("btnLiveQualityMenu");
       if (liveBtn) {
         const lvlIdx = activePlayer.hlsPlayer ? activePlayer.hlsPlayer.currentLevel : -1;
         const lvls = activePlayer.hlsLevels || [];
-        const lbl = (lvlIdx >= 0 && lvls[lvlIdx] && lvls[lvlIdx].height)
-          ? (lvls[lvlIdx].height >= 2000 ? "4K" : lvls[lvlIdx].height >= 1400 ? "2K" : (lvls[lvlIdx].height + "p"))
-          : qualityShortLabel(qPref);
+        const lbl = realTag || ((lvlIdx >= 0 && lvls[lvlIdx] && lvls[lvlIdx].height)
+          ? formatResolutionShort(lvls[lvlIdx].height)
+          : qualityShortLabel(qPref));
         liveBtn.textContent = "🎬 " + lbl;
       }
     }
@@ -3163,11 +3313,23 @@
         } else {
           const avail = activePlayer.availableTracks || [];
           const curTrackIdx = typeof activePlayer.selectedTrackIndex === "number" ? activePlayer.selectedTrackIndex : 0;
+          const enhMode = getVideoEnhanceMode();
+          const realW = activePlayer.realVideoWidth || 0;
+          const realH = activePlayer.realVideoHeight || 0;
+          const realInfo = realH > 0 ? `${formatResolutionShort(realH)} (${realW}×${realH})` : (activePlayer.currentQuality || "Detectando...");
           panel.innerHTML = `
             <div style="display:flex;justify-content:space-between;align-items:center;">
-              <strong style="font-size:16px;color:#fff;">🎬 Calidad de Reproducción</strong>
+              <strong style="font-size:16px;color:#fff;">🎬 Calidad y Mejora Visual</strong>
               <button class="pill" style="padding:4px 10px;" onclick="document.getElementById('trackPanel').classList.remove('open')">✕</button>
             </div>
+            <div style="font-size:12px;color:#00e5b4;font-weight:800;">Resolución real del video: ${escapeHtml(realInfo)}</div>
+            <div style="font-size:12px;color:#ffd54f;font-weight:800;margin-top:4px;">✨ Renderizado de Mejora (Nitidez GPU + Contraste):</div>
+            ${ENHANCE_OPTIONS.map(m => `
+              <button class="pill ${enhMode === m ? 'active' : ''}" style="text-align:left;" onclick="selectEnhanceInPlayer('${m}')">
+                ${enhMode === m ? "✓ " : ""}${enhanceLabel(m)}
+              </button>
+            `).join("")}
+            <div style="font-size:12px;color:#ff6b72;font-weight:800;margin-top:6px;">Resolución solicitada al servidor:</div>
             ${QUALITY_OPTIONS.map(q => `
               <button class="pill ${qPref === q ? 'active' : ''}" style="text-align:left;" onclick="selectVodQuality('${q}')">
                 ${qPref === q ? "✓ " : ""}${qualityLabel(q)}
@@ -3249,6 +3411,13 @@
       } catch (e) {
         showSeekToast("⚠ No se pudo cambiar calidad");
       }
+    }
+
+    function selectEnhanceInPlayer(mode) {
+      localStorage.setItem("mf_web_enhance", mode);
+      applyWebVideoEnhance();
+      document.getElementById("trackPanel").classList.remove("open");
+      showSeekToast(enhanceLabel(mode));
     }
 
     function selectVodQuality(q) {
@@ -3371,7 +3540,11 @@
       activePlayer.selectedAudioIdx = 0;
       activePlayer.availableTracks = [];
       activePlayer.selectedTrackIndex = 0;
+      activePlayer.realVideoWidth = 0;
+      activePlayer.realVideoHeight = 0;
       activePlayer.currentQuality = qualityLabel(getPreferredQuality());
+      updateRealVideoResolutionBadge();
+      applyWebVideoEnhance();
       updateQualityButtonLabels();
 
       try {
@@ -3479,6 +3652,10 @@
       document.getElementById("trackPanel").classList.remove("open");
       document.getElementById("subOverlay").style.display = "none";
       activePlayer.isLive = true;
+      activePlayer.realVideoWidth = 0;
+      activePlayer.realVideoHeight = 0;
+      updateRealVideoResolutionBadge();
+      applyWebVideoEnhance();
       updateLiveFavBtn();
 
       try {
@@ -3550,6 +3727,9 @@
 
     document.getElementById("videoEl").addEventListener("play", updatePlayPauseIcon);
     document.getElementById("videoEl").addEventListener("pause", updatePlayPauseIcon);
+    document.getElementById("videoEl").addEventListener("loadedmetadata", updateRealVideoResolutionBadge);
+    document.getElementById("videoEl").addEventListener("resize", updateRealVideoResolutionBadge);
+    document.getElementById("videoEl").addEventListener("playing", updateRealVideoResolutionBadge);
     document.getElementById("videoEl").addEventListener("timeupdate", function () {
       if (!activePlayer.isLive && !isScrubbing) {
         const cur = this.currentTime || 0;

@@ -710,7 +710,12 @@ try {
         subtitles: []
       });
     }
-    return magis.resolve(id, seriesId, { hevc: false }, async (err, pb) => {
+    const qualityPref = String(parsed.query.quality || "auto").trim().toLowerCase();
+    const trackIdxRaw = parsed.query.trackIndex !== undefined ? parseInt(parsed.query.trackIndex, 10) : -1;
+    const wantsHighRes = qualityPref === "2160" || qualityPref === "4k" || qualityPref === "1440" || qualityPref === "2k";
+    const resolveOpts = { hevc: wantsHighRes, uhd: wantsHighRes, quality: qualityPref };
+    if (!Number.isNaN(trackIdxRaw) && trackIdxRaw >= 0) resolveOpts.trackIndex = trackIdxRaw;
+    return magis.resolve(id, seriesId, resolveOpts, async (err, pb) => {
       if (err) return sendJson(res, 500, { error: err.message });
       const ext = pb.url.toLowerCase().endsWith(".mp4") ? "mp4" : "ts";
       const tsInfo = ext === "ts" ? await probeTsInfo(pb.url, pb.headers) : { totalLen: 0, audioPids: [] };
@@ -744,6 +749,8 @@ try {
         mime: pb.mime,
         codec: pb.codec,
         quality: pb.quality,
+        selectedTrack: pb.selectedTrack || null,
+        trackIndex: pb.trackIndex || 0,
         duration: durationSec,
         audio: pb.audio,
         audioTracks,

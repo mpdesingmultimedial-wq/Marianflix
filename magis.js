@@ -1703,15 +1703,23 @@ var xQualityPref = "auto",
   xHevcOk = !0,
   xUhdOk = !1;
 function xTier(e) {
+  if ("480" === xQualityPref) {
+    return e > 0 && e < 700 ? 1 : e >= 700 && e < 1e3 ? 2 : e >= 1e3 && e < 2e3 ? 3 : 4;
+  }
+  if ("1440" === xQualityPref) {
+    return e >= 1400 && e < 2e3 ? 1 : e >= 1e3 && e < 1400 ? 2 : e >= 2e3 ? 3 : 4;
+  }
   var t = "2160" === xQualityPref || ("auto" === xQualityPref && xUhdOk);
   return t
     ? e >= 2e3
       ? 1
-      : e >= 1e3
+      : e >= 1400
         ? 2
-        : e >= 700
+        : e >= 1e3
           ? 3
-          : 4
+          : e >= 700
+            ? 4
+            : 5
     : "720" === xQualityPref
       ? e >= 700 && e < 2e3
         ? e < 1e3
@@ -1873,14 +1881,21 @@ function resolve(e, r, t, n) {
   ("function" == typeof t && ((n = t), (t = {})),
     (t = t || {}),
     (xQualityPref =
-      "720" === trim(t.quality).toLowerCase() ||
-      "save" === trim(t.quality).toLowerCase()
-        ? "720"
-        : "1080" === trim(t.quality).toLowerCase()
-          ? "1080"
-          : "2160" === trim(t.quality).toLowerCase()
-            ? "2160"
-            : "auto"),
+      "480" === trim(t.quality).toLowerCase() ||
+      "sd" === trim(t.quality).toLowerCase()
+        ? "480"
+        : "720" === trim(t.quality).toLowerCase() ||
+            "save" === trim(t.quality).toLowerCase()
+          ? "720"
+          : "1080" === trim(t.quality).toLowerCase()
+            ? "1080"
+            : "1440" === trim(t.quality).toLowerCase() ||
+                "2k" === trim(t.quality).toLowerCase()
+              ? "1440"
+              : "2160" === trim(t.quality).toLowerCase() ||
+                  "4k" === trim(t.quality).toLowerCase()
+                ? "2160"
+                : "auto"),
     (xHevcOk = !(
       !1 === t.hevc ||
       "false" === String(t.hevc) ||

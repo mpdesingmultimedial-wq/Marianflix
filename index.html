@@ -1139,6 +1139,20 @@
     <div class="detail-box" id="detailContent"></div>
   </div>
 
+  <!-- Adult TV +18 Password Modal -->
+  <div class="modal-backdrop" id="adultPinModal" onclick="if(event.target===this)closeAdultPinModal()">
+    <div class="detail-box" style="max-width:420px;padding:24px;display:flex;flex-direction:column;gap:14px;">
+      <div style="font-size:20px;font-weight:900;color:#fff;">🔒 Categoría TV +18 Protegida</div>
+      <div style="font-size:13px;color:#c2c4d6;" id="adultPinPromptMsg">Ingresá tu contraseña de control parental para acceder a los canales +18.</div>
+      <input id="adultPinInput" type="password" class="search-input" placeholder="Contraseña..." onkeydown="if(event.key==='Enter')submitAdultPinModal()" />
+      <div id="adultPinErr" style="font-size:12px;color:#ff5c6c;font-weight:700;display:none;"></div>
+      <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:4px;">
+        <button class="pill" onclick="closeAdultPinModal()">Cancelar</button>
+        <button class="pill active" onclick="submitAdultPinModal()">Desbloquear</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Video Player Modal -->
   <div class="player-modal" id="playerModal">
     <div class="player-topbar">
@@ -1147,6 +1161,7 @@
         <strong id="playerTitle" style="font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Reproduciendo</strong>
       </div>
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;" id="playerVodControls">
+        <button class="pill" id="btnQualityMenu" onclick="openTrackMenu('quality')">🎬 Calidad</button>
         <button class="pill" id="btnAudioMenu" onclick="openTrackMenu('audio')">🔊 Audio</button>
         <button class="pill" id="btnSubMenu" onclick="openTrackMenu('sub')">💬 Subtítulos</button>
         <button class="pill" onclick="restartCurrentVideo()">↺ Reiniciar</button>
@@ -1156,6 +1171,7 @@
         <button class="flow-pill" onclick="zapLiveChannel(-1)">CH ▼</button>
         <button class="flow-pill" onclick="zapLiveChannel(1)">CH ▲</button>
         <button class="flow-pill" id="btnLiveFav" onclick="toggleActiveLiveFav()">♡ Fav</button>
+        <button class="flow-pill" id="btnLiveQualityMenu" onclick="openTrackMenu('quality')">🎬 Calidad</button>
         <button class="flow-pill" id="btnLiveZoom" onclick="toggleLiveZoom()">Zoom: Ajustar</button>
         <button class="flow-pill" onclick="toggleFullscreenPlayer()">⛶</button>
       </div>
@@ -1253,8 +1269,157 @@
       customVod: [],
       customM3uUrl: "",
       sessionStatus: { ready: false, lastError: "" },
-      activeDetail: null
+      activeDetail: null,
+      adultUnlocked: false
     };
+
+    // Quality Preference & Parental Control (+18) Helpers
+    const QUALITY_OPTIONS = ["auto", "2160", "1440", "1080", "720", "480"];
+    function getPreferredQuality() {
+      const q = (localStorage.getItem("mf_web_quality") || "auto").toLowerCase();
+      return QUALITY_OPTIONS.includes(q) ? q : "auto";
+    }
+    function setPreferredQuality(q) {
+      const clean = QUALITY_OPTIONS.includes(String(q)) ? String(q) : "auto";
+      localStorage.setItem("mf_web_quality", clean);
+      render();
+    }
+    function qualityLabel(q) {
+      if (q === "2160") return "4K UHD (2160p)";
+      if (q === "1440") return "2K QHD (1440p)";
+      if (q === "1080") return "1080p Full HD";
+      if (q === "720") return "720p HD";
+      if (q === "480") return "480p SD";
+      return "Automática";
+    }
+    function qualityShortLabel(q) {
+      if (q === "2160") return "4K";
+      if (q === "1440") return "2K";
+      if (q === "1080") return "1080p";
+      if (q === "720") return "720p";
+      if (q === "480") return "480p";
+      return "Auto";
+    }
+
+    function isAdultLockEnabled() {
+      const raw = localStorage.getItem("mf_adult_lock_enabled");
+      return raw === null ? true : raw === "1";
+    }
+    function getAdultPin() {
+      return localStorage.getItem("mf_adult_pin") || "1234";
+    }
+    function isAdultLockedNow() {
+      return isAdultLockEnabled() && !state.adultUnlocked;
+    }
+    function isAdultCategory(id, name) {
+      const cid = String(id || "").trim();
+      if (cid === "76208") return true;
+      const n = String(name || "").trim().toLowerCase();
+      if (!n || n.includes("adult swim")) return false;
+      return /(?:^|[\s(\[])(?:18\+|\+18|adultos?|xxx|porno?|er[oó]tic[oa]s?|hot\s*\+?18)(?:$|[\s)\]])/i.test(n);
+    }
+    function isAdultChannel(ch) {
+      if (!ch) return false;
+      if (isAdultCategory("", ch.category)) return true;
+      const t = String(ch.name || ch.title || "").trim().toLowerCase();
+      if (!t || t.includes("adult swim") || t.includes("venus media")) return false;
+      return /(?:^|\b)(?:xxx|porno?|playboy|penthouse|hustler|brazzers|sextreme|dorcel|private\s*tv|venus\s*tv|18\+|\+18)(?:\b|$)/i.test(t);
+    }
+
+    let pendingAdultCallback = null;
+    function openAdultPinModal(onSuccess, customMsg) {
+      pendingAdultCallback = onSuccess || null;
+      const modal = document.getElementById("adultPinModal");
+      const inp = document.getElementById("adultPinInput");
+      const err = document.getElementById("adultPinErr");
+      const msg = document.getElementById("adultPinPromptMsg");
+      if (msg) msg.textContent = customMsg || "Ingresá tu contraseña de control parental para acceder a los canales +18.";
+      if (err) { err.style.display = "none"; err.textContent = ""; }
+      if (inp) inp.value = "";
+      if (modal) modal.classList.add("open");
+      setTimeout(() => { if (inp) inp.focus(); }, 60);
+    }
+    function closeAdultPinModal() {
+      pendingAdultCallback = null;
+      const modal = document.getElementById("adultPinModal");
+      if (modal) modal.classList.remove("open");
+    }
+    function submitAdultPinModal() {
+      const inp = document.getElementById("adultPinInput");
+      const err = document.getElementById("adultPinErr");
+      const entered = (inp ? inp.value : "").trim();
+      if (entered !== getAdultPin()) {
+        if (err) {
+          err.textContent = "✗ Contraseña incorrecta. Probá nuevamente.";
+          err.style.display = "block";
+        }
+        if (inp) { inp.value = ""; inp.focus(); }
+        return;
+      }
+      const cb = pendingAdultCallback;
+      closeAdultPinModal();
+      if (cb) cb();
+    }
+    function selectLiveCategoryGuarded(colId, catName) {
+      const cid = String(colId);
+      if (isAdultCategory(cid, catName) && isAdultLockedNow()) {
+        openAdultPinModal(() => {
+          state.adultUnlocked = true;
+          loadLiveCategory(cid);
+        }, `Ingresá tu contraseña para abrir "${catName || "TV +18"}".`);
+        return;
+      }
+      if (cid === "__FAVS__") {
+        state.selectedLiveCat = "__FAVS__";
+        render();
+      } else {
+        loadLiveCategory(cid);
+      }
+    }
+    function lockAdultNow() {
+      state.adultUnlocked = false;
+      const curCat = (state.liveCategories || []).find(c => String(c.id) === String(state.selectedLiveCat));
+      if (isAdultCategory(state.selectedLiveCat, curCat && curCat.name)) {
+        stopLivePreview();
+        loadLiveCategory("__ALL_MERGED__");
+      } else {
+        render();
+      }
+    }
+    function toggleAdultLockFromSettings() {
+      if (isAdultLockEnabled()) {
+        openAdultPinModal(() => {
+          localStorage.setItem("mf_adult_lock_enabled", "0");
+          state.adultUnlocked = true;
+          alert("Bloqueo de TV +18 desactivado.");
+          render();
+        }, "Ingresá tu contraseña actual para desactivar el bloqueo de TV +18.");
+      } else {
+        localStorage.setItem("mf_adult_lock_enabled", "1");
+        state.adultUnlocked = false;
+        alert("Bloqueo de TV +18 activado.");
+        render();
+      }
+    }
+    function saveAdultPinFromSettings() {
+      const curInp = document.getElementById("inpAdultPinCurrent");
+      const newInp = document.getElementById("inpAdultPinNew");
+      const curVal = (curInp ? curInp.value : "").trim();
+      const newVal = (newInp ? newInp.value : "").trim();
+      if (curVal !== getAdultPin()) {
+        return alert("✗ La contraseña actual no coincide.");
+      }
+      if (newVal.length < 4) {
+        return alert("✗ La nueva contraseña debe tener al menos 4 caracteres o dígitos.");
+      }
+      localStorage.setItem("mf_adult_pin", newVal);
+      localStorage.setItem("mf_adult_lock_enabled", "1");
+      state.adultUnlocked = false;
+      if (curInp) curInp.value = "";
+      if (newInp) newInp.value = "";
+      alert("✓ Contraseña de TV +18 actualizada y bloqueo activado.");
+      render();
+    }
 
     function normalizeItem(raw, defaultKind) {
       if (!raw || !raw.id) return null;
@@ -2138,7 +2303,9 @@
       const baseChs = state.selectedLiveCat === "__FAVS__"
         ? state.liveChannels.filter(c => isLiveFav(c.channelCode || c.id))
         : state.liveChannels;
+      const lockedNow = isAdultLockedNow();
       const chs = baseChs.filter(c => {
+        if (lockedNow && isAdultChannel(c)) return false;
         if (!q) return true;
         return String(c.name || "").toLowerCase().includes(q) || String(c.index || c.number || "").includes(q);
       });
@@ -2165,6 +2332,7 @@
               <h1 style="font-size:20px;font-weight:900;color:#fff;">Guía TV • ${escapeHtml(activeCat ? activeCat.name : "En Vivo")}</h1>
             </div>
             <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+              ${isAdultLockEnabled() && state.adultUnlocked ? `<button class="flow-pill" style="border-color:#ff5c6c;color:#ff8a95;" onclick="lockAdultNow()">🔒 Bloquear +18</button>` : ""}
               <button class="flow-pill ${state.liveTab===0?'active':''}" onclick="state.liveTab=0;render();">Canales</button>
               <button class="flow-pill ${state.liveTab===1?'active':''}" onclick="stopLivePreview();state.liveTab=1;render();">Guía EPG</button>
               <span class="flow-live-clock">● ${timeStr}</span>
@@ -2172,11 +2340,15 @@
           </div>
 
           <div class="pills-row">
-            ${cats.map(c => `
-              <button class="flow-pill ${state.selectedLiveCat===c.id?'active':''}" onclick="if('${escapeHtml(c.id)}'==='__FAVS__'){state.selectedLiveCat='__FAVS__';render();}else{loadLiveCategory('${escapeHtml(c.id)}');}">
-                ${escapeHtml(c.name)}
+            ${cats.map(c => {
+              const adultCat = isAdultCategory(c.id, c.name);
+              const prefix = adultCat ? (lockedNow ? "🔒 " : "🔓 ") : "";
+              return `
+              <button class="flow-pill ${state.selectedLiveCat===c.id?'active':''}" onclick="selectLiveCategoryGuarded('${escapeHtml(c.id)}', '${escapeHtml(c.name)}')">
+                ${prefix}${escapeHtml(c.name)}
               </button>
-            `).join("")}
+            `;
+            }).join("")}
           </div>
 
           <div style="margin: 4px 0 10px;">
@@ -2452,6 +2624,44 @@
                   <button class="pill" onclick="saveBackendApiBase(true)">Usar Render</button>
                 </div>
               </div>` : ""}
+            </div>
+
+            <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
+              <div style="font-size:16px;font-weight:800;color:#fff;">🎬 Calidad de Reproducción (Web)</div>
+              <div style="font-size:12px;color:#b8b8c8;">
+                Elegí la calidad preferida por defecto para Películas, Series y TV en Vivo (también podés cambiarla en cualquier momento desde el reproductor):
+              </div>
+              <div style="display:flex;gap:8px;flex-wrap:wrap;">
+                ${QUALITY_OPTIONS.map(q => `
+                  <button class="pill ${getPreferredQuality()===q?'active':''}" onclick="setPreferredQuality('${q}')">
+                    ${getPreferredQuality()===q ? "✓ " : ""}${qualityLabel(q)}
+                  </button>
+                `).join("")}
+              </div>
+            </div>
+
+            <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
+              <div style="font-size:16px;font-weight:800;color:#fff;">🔒 Control Parental • Bloqueo TV +18</div>
+              <div style="font-size:12px;color:#b8b8c8;">
+                Estado: <strong style="color:${isAdultLockEnabled() ? '#46d369' : '#ffd54f'};">${isAdultLockEnabled() ? "Bloqueo activado 🔒" : "Bloqueo desactivado 🔓"}</strong>
+                ${getAdultPin() === "1234" ? `<span style="color:#ffd54f;"> • Contraseña inicial por defecto: <strong>1234</strong></span>` : ""}
+              </div>
+              <div style="display:flex;gap:10px;flex-wrap:wrap;">
+                <button class="pill ${isAdultLockEnabled() ? '' : 'active'}" onclick="toggleAdultLockFromSettings()">
+                  ${isAdultLockEnabled() ? "🔓 Desactivar bloqueo (pide contraseña)" : "🔒 Activar bloqueo TV +18"}
+                </button>
+                ${isAdultLockEnabled() && state.adultUnlocked ? `<button class="pill" style="border-color:#ff5c6c;color:#ff8a95;" onclick="lockAdultNow()">🔒 Bloquear +18 ahora</button>` : ""}
+              </div>
+              <div style="margin-top:4px;padding-top:10px;border-top:1px solid #262636;display:flex;flex-direction:column;gap:8px;">
+                <div style="font-size:12px;color:#b8b8c8;">Cambiar contraseña de TV +18 (mínimo 4 caracteres o dígitos):</div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;">
+                  <input id="inpAdultPinCurrent" type="password" class="search-input" placeholder="Contraseña actual" />
+                  <input id="inpAdultPinNew" type="password" class="search-input" placeholder="Nueva contraseña" />
+                </div>
+                <div>
+                  <button class="pill active" onclick="saveAdultPinFromSettings()">Guardar contraseña</button>
+                </div>
+              </div>
             </div>
 
             <div style="background:#14141c;border:1px solid #282838;border-radius:12px;padding:18px;display:flex;flex-direction:column;gap:10px;">
@@ -2874,10 +3084,111 @@
       showPlayerOverlay();
     }
 
+    function updateQualityButtonLabels() {
+      const qPref = getPreferredQuality();
+      const vodBtn = document.getElementById("btnQualityMenu");
+      if (vodBtn) {
+        const curQ = activePlayer.currentQuality || qualityLabel(qPref);
+        vodBtn.textContent = "🎬 " + curQ;
+      }
+      const liveBtn = document.getElementById("btnLiveQualityMenu");
+      if (liveBtn) {
+        const lvlIdx = activePlayer.hlsPlayer ? activePlayer.hlsPlayer.currentLevel : -1;
+        const lvls = activePlayer.hlsLevels || [];
+        const lbl = (lvlIdx >= 0 && lvls[lvlIdx] && lvls[lvlIdx].height)
+          ? (lvls[lvlIdx].height >= 2000 ? "4K" : lvls[lvlIdx].height >= 1400 ? "2K" : (lvls[lvlIdx].height + "p"))
+          : qualityShortLabel(qPref);
+        liveBtn.textContent = "🎬 " + lbl;
+      }
+    }
+
+    function applyPreferredHlsQuality(hls) {
+      if (!hls || !Array.isArray(hls.levels) || !hls.levels.length) return;
+      const qPref = getPreferredQuality();
+      if (qPref === "auto") {
+        hls.autoLevelCapping = -1;
+        hls.currentLevel = -1;
+        return;
+      }
+      const maxH = parseInt(qPref, 10) || 1080;
+      let bestIdx = -1;
+      let bestH = 0;
+      hls.levels.forEach((lvl, idx) => {
+        const h = Number(lvl.height) || 0;
+        if (h > 0 && h <= maxH && h >= bestH) {
+          bestH = h;
+          bestIdx = idx;
+        }
+      });
+      if (bestIdx >= 0) {
+        hls.autoLevelCapping = bestIdx;
+        hls.currentLevel = bestIdx;
+      } else {
+        hls.autoLevelCapping = -1;
+        hls.currentLevel = -1;
+      }
+    }
+
     function renderTrackPanel() {
       const panel = document.getElementById("trackPanel");
       const mode = activePlayer.menuMode || "audio";
-      if (mode === "audio") {
+      if (mode === "quality") {
+        const qPref = getPreferredQuality();
+        if (activePlayer.isLive) {
+          const lvls = activePlayer.hlsLevels || [];
+          const curLvl = activePlayer.hlsPlayer ? activePlayer.hlsPlayer.currentLevel : -1;
+          panel.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <strong style="font-size:16px;color:#fff;">🎬 Calidad de Video (En Vivo)</strong>
+              <button class="pill" style="padding:4px 10px;" onclick="document.getElementById('trackPanel').classList.remove('open')">✕</button>
+            </div>
+            <button class="pill ${curLvl === -1 && qPref === 'auto' ? 'active' : ''}" style="text-align:left;" onclick="selectLiveQualityLevel(-1, 'auto')">
+              ${curLvl === -1 && qPref === 'auto' ? "✓ " : ""}Automática (Adaptativa)
+            </button>
+            ${lvls.length > 1 ? lvls.map((lvl, idx) => {
+              const h = lvl.height ? (lvl.height + "p") : ("Nivel " + (idx + 1));
+              const br = lvl.bitrate ? (" • " + Math.round(lvl.bitrate / 1000) + " kbps") : "";
+              const sel = curLvl === idx;
+              return `
+                <button class="pill ${sel ? 'active' : ''}" style="text-align:left;" onclick="selectLiveQualityLevel(${idx}, '${lvl.height || 'auto'}')">
+                  ${sel ? "✓ " : ""}${escapeHtml(h + br)}
+                </button>
+              `;
+            }).join("") : ["2160", "1440", "1080", "720", "480"].map(q => `
+              <button class="pill ${qPref === q ? 'active' : ''}" style="text-align:left;" onclick="selectLiveQualityLevel(-1, '${q}')">
+                ${qPref === q ? "✓ " : ""}Preferir ${qualityLabel(q)}
+              </button>
+            `).join("")}
+          `;
+        } else {
+          const avail = activePlayer.availableTracks || [];
+          const curTrackIdx = typeof activePlayer.selectedTrackIndex === "number" ? activePlayer.selectedTrackIndex : 0;
+          panel.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <strong style="font-size:16px;color:#fff;">🎬 Calidad de Reproducción</strong>
+              <button class="pill" style="padding:4px 10px;" onclick="document.getElementById('trackPanel').classList.remove('open')">✕</button>
+            </div>
+            ${QUALITY_OPTIONS.map(q => `
+              <button class="pill ${qPref === q ? 'active' : ''}" style="text-align:left;" onclick="selectVodQuality('${q}')">
+                ${qPref === q ? "✓ " : ""}${qualityLabel(q)}
+              </button>
+            `).join("")}
+            ${avail.length > 1 ? `
+              <div style="font-size:12px;color:#ff6b72;font-weight:800;margin-top:6px;">Fuentes disponibles para este título:</div>
+              ${avail.map((t, idx) => {
+                const h = t.height ? (t.height + "p") : (t.quality || ("Opción " + (idx + 1)));
+                const meta = [t.codec, t.format ? t.format.toUpperCase() : "", t.bitrateKbps ? (Math.round(t.bitrateKbps) + " kbps") : ""].filter(Boolean).join(" • ");
+                const sel = curTrackIdx === idx;
+                return `
+                  <button class="pill ${sel ? 'active' : ''}" style="text-align:left;" onclick="selectVodTrackIndex(${idx})">
+                    ${sel ? "✓ " : ""}${escapeHtml(h + (meta ? " (" + meta + ")" : ""))}
+                  </button>
+                `;
+              }).join("")}
+            ` : ""}
+          `;
+        }
+      } else if (mode === "audio") {
         const tracks = activePlayer.audioTracks && activePlayer.audioTracks.length
           ? activePlayer.audioTracks
           : [{ index: 0, lang: "es" }];
@@ -2912,6 +3223,61 @@
           `).join("")}
         `;
       }
+    }
+
+    async function reloadVodWithOptions(qualityPref, trackIndex) {
+      if (!activePlayer.contentId) return;
+      const v = document.getElementById("videoEl");
+      const curPos = (v && isFinite(v.currentTime)) ? v.currentTime : 0;
+      document.getElementById("trackPanel").classList.remove("open");
+      showSeekToast("🎬 Cambiando calidad...");
+      try {
+        const q = encodeURIComponent(qualityPref || getPreferredQuality());
+        const ti = (typeof trackIndex === "number" && trackIndex >= 0) ? `&trackIndex=${trackIndex}` : "";
+        const pb = await apiGet(`/api/resolve-vod?id=${encodeURIComponent(activePlayer.contentId)}&seriesId=${encodeURIComponent(activePlayer.seriesId || "")}&quality=${q}${ti}`, 20000);
+        if (pb && pb.error) throw new Error(pb.error);
+        activePlayer.hlsUrl = pb.hlsUrl || "";
+        activePlayer.streamUrl = pb.streamUrl || "";
+        activePlayer.format = pb.format || "ts";
+        activePlayer.availableTracks = pb.availableTracks || activePlayer.availableTracks || [];
+        activePlayer.selectedTrackIndex = typeof pb.trackIndex === "number" ? pb.trackIndex : 0;
+        const selT = pb.selectedTrack || activePlayer.availableTracks[activePlayer.selectedTrackIndex] || null;
+        activePlayer.currentQuality = (selT && selT.height) ? (selT.height + "p") : (pb.quality || qualityLabel(qualityPref || getPreferredQuality()));
+        updateQualityButtonLabels();
+        loadVodEngine(curPos);
+        showSeekToast("🎬 Calidad: " + activePlayer.currentQuality);
+      } catch (e) {
+        showSeekToast("⚠ No se pudo cambiar calidad");
+      }
+    }
+
+    function selectVodQuality(q) {
+      localStorage.setItem("mf_web_quality", q);
+      reloadVodWithOptions(q, -1);
+    }
+
+    function selectVodTrackIndex(idx) {
+      reloadVodWithOptions(getPreferredQuality(), idx);
+    }
+
+    function selectLiveQualityLevel(levelIdx, qPref) {
+      const cleanPref = QUALITY_OPTIONS.includes(String(qPref)) ? String(qPref) : "auto";
+      localStorage.setItem("mf_web_quality", cleanPref);
+      const hls = activePlayer.hlsPlayer;
+      if (hls) {
+        if (levelIdx >= 0 && Array.isArray(hls.levels) && hls.levels[levelIdx]) {
+          hls.autoLevelCapping = levelIdx;
+          hls.currentLevel = levelIdx;
+          showSeekToast("🎬 Calidad: " + (hls.levels[levelIdx].height ? (hls.levels[levelIdx].height + "p") : ("Nivel " + (levelIdx + 1))));
+        } else {
+          applyPreferredHlsQuality(hls);
+          showSeekToast("🎬 Calidad: " + qualityLabel(cleanPref));
+        }
+      } else {
+        showSeekToast("🎬 Preferencia: " + qualityLabel(cleanPref));
+      }
+      document.getElementById("trackPanel").classList.remove("open");
+      updateQualityButtonLabels();
     }
 
     function loadVodEngine(resumeSec) {
@@ -2997,17 +3363,29 @@
       const resumeSec = (saved && saved.posSec > 3) ? saved.posSec : 0;
 
       activePlayer.playKey = playKey;
+      activePlayer.contentId = contentId;
+      activePlayer.seriesId = seriesId || "";
       activePlayer.title = title;
       activePlayer.isLive = false;
       activePlayer.itemObj = findItemById(seriesId || contentId);
       activePlayer.selectedAudioIdx = 0;
+      activePlayer.availableTracks = [];
+      activePlayer.selectedTrackIndex = 0;
+      activePlayer.currentQuality = qualityLabel(getPreferredQuality());
+      updateQualityButtonLabels();
 
       try {
         showSeekToast("⏳ Conectando stream VOD...");
-        const pb = await apiGet(`/api/resolve-vod?id=${encodeURIComponent(contentId)}&seriesId=${encodeURIComponent(seriesId || "")}`, 20000);
+        const qPref = getPreferredQuality();
+        const pb = await apiGet(`/api/resolve-vod?id=${encodeURIComponent(contentId)}&seriesId=${encodeURIComponent(seriesId || "")}&quality=${encodeURIComponent(qPref)}`, 20000);
         if (pb && pb.error) throw new Error(pb.error);
         activePlayer.subtitles = pb.subtitles || [];
         activePlayer.audioTracks = pb.audioTracks || [{ index: 0, lang: "es" }];
+        activePlayer.availableTracks = pb.availableTracks || [];
+        activePlayer.selectedTrackIndex = typeof pb.trackIndex === "number" ? pb.trackIndex : 0;
+        const selT = pb.selectedTrack || activePlayer.availableTracks[activePlayer.selectedTrackIndex] || null;
+        activePlayer.currentQuality = (selT && selT.height) ? (selT.height + "p") : (pb.quality || qualityLabel(qPref));
+        updateQualityButtonLabels();
         activePlayer.hlsUrl = pb.hlsUrl || "";
         activePlayer.streamUrl = pb.streamUrl || "";
         activePlayer.format = pb.format || "ts";
@@ -3115,12 +3493,20 @@
         const video = document.getElementById("videoEl");
         video.controls = true;
         video.style.objectFit = liveZoomCover ? "cover" : "contain";
+        activePlayer.hlsLevels = [];
+        updateQualityButtonLabels();
         if (window.Hls && Hls.isSupported()) {
           const hls = new Hls({ enableWorker: false, lowLatencyMode: false });
           activePlayer.hlsPlayer = hls;
           hls.loadSource(fullLiveUrl);
           hls.attachMedia(video);
-          hls.on(Hls.Events.MANIFEST_PARSED, () => video.play().catch(() => {}));
+          hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            activePlayer.hlsLevels = Array.isArray(hls.levels) ? hls.levels : [];
+            applyPreferredHlsQuality(hls);
+            updateQualityButtonLabels();
+            video.play().catch(() => {});
+          });
+          hls.on(Hls.Events.LEVEL_SWITCHED, () => updateQualityButtonLabels());
           hls.on(Hls.Events.ERROR, (ev, data) => {
             if (data && data.fatal) {
               if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {

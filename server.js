@@ -429,13 +429,34 @@ const server = http.createServer((req, res) => {
     });
   }
 
-  // API: Search
+  // API: Search (Portal v3/searchByName + custom M3U VOD normalized merge)
   if (pathname === "/api/search") {
-    const q = parsed.query.q || "";
+    const q = String(parsed.query.q || "").trim();
     const page = parseInt(parsed.query.page, 10) || 1;
+    const normTxt = (s) => String(s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "");
+    const qLow = q.toLowerCase();
+    const qNorm = normTxt(q);
+    const customHits = (q && Array.isArray(customVodState.items))
+      ? customVodState.items.filter(it => {
+          const tLow = String(it.title || "").toLowerCase();
+          const tNorm = normTxt(it.title);
+          return tLow.includes(qLow) || (qNorm.length >= 2 && tNorm.includes(qNorm));
+        })
+      : [];
     return magis.search(q, page, (err, data) => {
-      if (err) return sendJson(res, 500, { error: err.message });
-      sendJson(res, 200, data);
+      if (err) {
+        if (customHits.length) return sendJson(res, 200, { items: customHits, total: customHits.length, cached: false });
+        return sendJson(res, 500, { error: err.message });
+      }
+      const items = Array.isArray(data && data.items) ? data.items.slice() : [];
+      const seen = new Set(items.map(it => it && it.id));
+      customHits.forEach(it => {
+        if (it && it.id && !seen.has(it.id)) {
+          seen.add(it.id);
+          items.push(it);
+        }
+      });
+      sendJson(res, 200, { items, total: items.length, cached: !!(data && data.cached) });
     });
   }
 

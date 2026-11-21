@@ -1876,42 +1876,81 @@
     }
 
     let searchTimer = null;
+    let searchSeq = 0;
+    function setSearchKindFilter(k) {
+      state.searchKindFilter = k || "all";
+      render();
+    }
+    function renderKeepSearchFocus(fromInputEl) {
+      const wasScreenInput = fromInputEl === "searchScreenInput" || (document.activeElement && document.activeElement.id === "searchScreenInput");
+      const selPos = (document.activeElement && document.activeElement.id === "searchScreenInput")
+        ? document.activeElement.selectionStart
+        : null;
+      render();
+      if (wasScreenInput) {
+        const inp = document.getElementById("searchScreenInput");
+        if (inp) {
+          inp.focus();
+          const pos = typeof selPos === "number" ? selPos : inp.value.length;
+          try { inp.setSelectionRange(pos, pos); } catch (_) {}
+        }
+      }
+    }
     function onGlobalSearch(val) {
-      state.searchQuery = val.trim();
-      if (!state.searchQuery) {
-        if (state.section === "search") state.section = "home";
-        render();
+      const fromId = document.activeElement ? document.activeElement.id : "";
+      state.searchQuery = val;
+      const trimmed = val.trim();
+      const mySeq = ++searchSeq;
+      clearTimeout(searchTimer);
+      if (!trimmed) {
+        state.searchLoading = false;
+        state.searchResults = [];
+        if (state.section === "search" && fromId !== "searchScreenInput") state.section = "home";
+        renderKeepSearchFocus(fromId);
         return;
       }
       state.section = "search";
-      const q = state.searchQuery.toLowerCase();
+      state.searchLoading = true;
+      const q = trimmed.toLowerCase();
+      const normQ = q.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "");
       const localPool = [...state.featured, ...state.movies, ...state.series];
       const seen = new Set();
       state.searchResults = localPool.filter(item => {
         if (seen.has(item.id)) return false;
+        const normT = item.title.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]+/g, "");
         const match = item.title.toLowerCase().includes(q) ||
+          (normQ.length >= 2 && normT.includes(normQ)) ||
           item.year.includes(q) ||
           item.genres.some(g => g.toLowerCase().includes(q));
         if (match) { seen.add(item.id); return true; }
         return false;
       });
-      render();
+      renderKeepSearchFocus(fromId);
 
-      clearTimeout(searchTimer);
       searchTimer = setTimeout(async () => {
         try {
-          const data = await apiGet(`/api/search?q=${encodeURIComponent(state.searchQuery)}`);
-          if (data && data.items) {
+          const data = await apiGet(`/api/search?q=${encodeURIComponent(trimmed)}`);
+          if (mySeq !== searchSeq) return;
+          if (data && Array.isArray(data.items)) {
             const remote = data.items.map(x => normalizeItem(x)).filter(Boolean);
-            const merged = [...state.searchResults];
-            remote.forEach(r => {
-              if (!merged.some(m => m.id === r.id)) merged.push(r);
+            const merged = [...remote];
+            const idSet = new Set(merged.map(m => m.id));
+            state.searchResults.forEach(localIt => {
+              if (localIt && !idSet.has(localIt.id)) {
+                idSet.add(localIt.id);
+                merged.push(localIt);
+              }
             });
             state.searchResults = merged;
-            render();
           }
-        } catch (_) {}
-      }, 420);
+        } catch (_) {
+        } finally {
+          if (mySeq === searchSeq) {
+            state.searchLoading = false;
+            renderKeepSearchFocus();
+          }
+        }
+      }, 380);
     }
 
     function escapeHtml(s) {
@@ -2602,17 +2641,30 @@
 
     function renderSearch() {
       const q = state.searchQuery || "";
+      const kindFilter = state.searchKindFilter || "all";
       const list = q.trim() ? state.searchResults : [...state.featured, ...state.movies.slice(0, 18), ...state.series.slice(0, 18)];
       const unique = [];
       const seen = new Set();
-      list.forEach(it => { if (it && !seen.has(it.id)) { seen.add(it.id); unique.push(it); } });
+      list.forEach(it => {
+        if (!it || seen.has(it.id)) return;
+        if (kindFilter === "movie" && it.kind === "series") return;
+        if (kindFilter === "series" && it.kind !== "series") return;
+        seen.add(it.id);
+        unique.push(it);
+      });
+
+      const statusText = q.trim()
+        ? (state.searchLoading
+            ? `Buscando "${escapeHtml(q.trim())}" en el portal... (${unique.length} hasta ahora)`
+            : `Resultados para "${escapeHtml(q.trim())}" (${unique.length})`)
+        : `Sugerencias populares (${unique.length})`;
 
       return `
         <div class="browser-page">
           <div class="page-header">
             <h1 class="page-title">Buscar</h1>
           </div>
-          <div style="margin-bottom:18px;">
+          <div style="margin-bottom:14px;">
             <input
               type="text"
               id="searchScreenInput"
@@ -2622,12 +2674,18 @@
               oninput="onGlobalSearch(this.value)"
             />
           </div>
+          <div class="pill-bar" style="margin-bottom:14px;">
+            <button class="pill ${kindFilter === "all" ? "active" : ""}" onclick="setSearchKindFilter('all')">Todo</button>
+            <button class="pill ${kindFilter === "movie" ? "active" : ""}" onclick="setSearchKindFilter('movie')">Películas</button>
+            <button class="pill ${kindFilter === "series" ? "active" : ""}" onclick="setSearchKindFilter('series')">Series</button>
+          </div>
           <div style="font-size:14px;color:#b8b8c8;margin-bottom:12px;">
-            ${q.trim() ? `Resultados para "${escapeHtml(q)}" (${unique.length})` : `Sugerencias populares (${unique.length})`}
+            ${statusText}
           </div>
-          <div class="media-grid">
-            ${unique.map(it => renderPosterCard(it)).join("")}
-          </div>
+          ${(!state.searchLoading && q.trim() && unique.length === 0)
+            ? `<div style="padding:36px 16px;text-align:center;color:#9aa8b8;font-size:15px;">No se encontraron resultados para "${escapeHtml(q.trim())}".</div>`
+            : `<div class="media-grid">${unique.map(it => renderPosterCard(it)).join("")}</div>`
+          }
         </div>
       `;
     }

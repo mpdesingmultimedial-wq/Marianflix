@@ -138,10 +138,14 @@ function trim(e) {
 }
 function imageOf(e, r) {
   var t = e && e.posterList;
-  if (t && t.length)
+  if (t && t.length) {
     for (var n = 0; n < t.length; n++)
       if (t[n] && t[n].fileType === r && "" !== trim(t[n].fileUrl))
         return trim(t[n].fileUrl);
+    for (var k = 0; k < t.length; k++)
+      if (t[k] && "" !== trim(t[k].fileUrl))
+        return trim(t[k].fileUrl);
+  }
   return "icon" === r
     ? trim(
         e.iconUrl ||
@@ -1385,6 +1389,13 @@ function column(e, r, t) {
       );
     }));
 }
+function normSearchText(s) {
+  return String(s || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
 function search(e, r, t) {
   "function" == typeof r && ((t = r), (r = 1));
   var n = trim(e);
@@ -1394,37 +1405,83 @@ function search(e, r, t) {
     s = searchCache[cacheKey];
   if (s && Date.now() - s.at < SEARCH_TTL)
     return t(null, { items: s.items, cached: !0 });
-  ensureSession(function (e) {
-    if (e) return t(e);
-    call(
-      "v3/searchByName",
-      {
-        value: n,
-        type: "1",
-        columnId: "",
-        filter: "",
-        pageNum: page,
-        pageSize: 50,
-      },
-      function (e, rResp) {
-        if (e) return t(e);
-        var s = rResp && rResp.searchItemList,
-          a = [],
-          o = {};
-        if (s && s.length)
-          for (var i = 0; i < s.length; i++) {
-            var l = s[i] && s[i].itemList;
-            if (l && l.length)
-              for (var u = 0; u < l.length; u++) {
-                var d = itemFromAsset(l[u], "", null);
-                d && !o[d.id] && ((o[d.id] = !0), a.push(d), remember(d));
-              }
+  ensureSession(function (errSess) {
+    if (errSess) return t(errSess);
+    var a = [],
+      o = {},
+      totalSize = 0;
+    function collectResp(rResp) {
+      var added = 0;
+      if (rResp && rResp.totalSize) totalSize = rResp.totalSize;
+      var groups = rResp && rResp.searchItemList;
+      if (groups && groups.length)
+        for (var i = 0; i < groups.length; i++) {
+          var l = groups[i] && groups[i].itemList;
+          if (l && l.length)
+            for (var u = 0; u < l.length; u++) {
+              var d = itemFromAsset(l[u], "", null);
+              d && !o[d.id] && ((o[d.id] = !0), a.push(d), remember(d), added++);
+            }
+        }
+      var direct = (rResp && (rResp.assetList || rResp.list)) || null;
+      if (direct && direct.length)
+        for (var k = 0; k < direct.length; k++) {
+          var d2 = itemFromAsset(direct[k], "", null);
+          d2 && !o[d2.id] && ((o[d2.id] = !0), a.push(d2), remember(d2), added++);
+        }
+      return added;
+    }
+    function finish() {
+      if (page === 1) {
+        var qLow = n.toLowerCase(),
+          qNorm = normSearchText(n),
+          keys = Object.keys(itemCache);
+        for (var ci = 0; ci < keys.length; ci++) {
+          var it = itemCache[keys[ci]];
+          if (!it || !it.id || o[it.id]) continue;
+          var tLow = String(it.title || "").toLowerCase(),
+            tNorm = normSearchText(it.title);
+          if (tLow.indexOf(qLow) !== -1 || (qNorm.length >= 2 && tNorm.indexOf(qNorm) !== -1)) {
+            o[it.id] = !0;
+            a.push(it);
           }
-        ((searchCache[cacheKey] = { at: Date.now(), items: a }),
-          pruneCache(searchCache, 16, SEARCH_TTL),
-          t(null, { items: a, total: rResp && rResp.totalSize, cached: !1 }));
+        }
       }
-    );
+      searchCache[cacheKey] = { at: Date.now(), items: a };
+      pruneCache(searchCache, 16, SEARCH_TTL);
+      t(null, { items: a, total: totalSize || a.length, cached: !1 });
+    }
+    function runSearchCall(typeVal, pageNum, cb) {
+      call(
+        "v3/searchByName",
+        {
+          value: n,
+          type: typeVal,
+          columnId: "",
+          filter: "",
+          pageNum: pageNum,
+          pageSize: 50,
+        },
+        function (errCall, rResp) {
+          if (errCall) return cb(errCall, 0);
+          cb(null, collectResp(rResp));
+        }
+      );
+    }
+    runSearchCall("1", page, function (err1, cnt1) {
+      if (err1) return t(err1);
+      if (cnt1 === 0 && page === 1) {
+        return runSearchCall("0", 1, function () {
+          finish();
+        });
+      }
+      if (page === 1 && cnt1 >= 45) {
+        return runSearchCall("1", 2, function () {
+          finish();
+        });
+      }
+      finish();
+    });
   });
 }
 function detail(e, r, t) {

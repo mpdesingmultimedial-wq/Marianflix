@@ -9,15 +9,16 @@
   <script src="catalog-fallback.js"></script>
   <style>
     :root {
-      --bg: #0b0b0f;
-      --bg-elev: #14141c;
-      --bg-card: #1a1a24;
+      --bg: #080b14;
+      --bg-elev: #0e1528;
+      --bg-card: #121a2c;
       --red: #e50914;
       --red-hover: #f6121d;
+      --glow: #8ceaff;
       --green: #46d369;
       --text: #ffffff;
-      --text-dim: #cfd0dc;
-      --text-muted: #9899a8;
+      --text-dim: #cfd9e8;
+      --text-muted: #92a2ba;
       --border: rgba(255, 255, 255, 0.14);
     }
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -29,41 +30,42 @@
       overflow: hidden;
     }
 
-    /* APK Exact App Shell: Left NavRail (>=600px) + Main Scrollable Content */
+    /* APK Exact App Shell: Left NavRail (>=600px) + Main Scrollable Content (Netflix + Disney+ Midnight) */
     .app-shell {
       display: flex;
       width: 100vw;
       height: 100vh;
       overflow: hidden;
-      background: #0b0b0f;
+      background: linear-gradient(180deg, #080b14 0%, #0e1528 50%, #080b14 100%);
     }
     .nav-rail {
-      width: 96px;
+      width: 92px;
       flex-shrink: 0;
       height: 100vh;
-      background: #12121a;
-      border-right: 1px solid #1e1e2c;
-      padding: 10px 6px;
+      background: linear-gradient(180deg, #0a0f1c 0%, #0e1629 50%, #090d18 100%);
+      border-right: 1px solid #1b2940;
+      padding: 12px 7px;
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 5px;
       overflow-y: auto;
       z-index: 100;
     }
     .rail-item {
       width: 100%;
       background: transparent;
-      border: 2px solid transparent;
-      border-radius: 10px;
+      border: 1.5px solid transparent;
+      border-radius: 12px;
       padding: 9px 4px;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       gap: 4px;
-      color: #ffffff;
+      color: #d6e2f0;
       cursor: pointer;
-      transition: background 0.15s, border-color 0.15s, color 0.15s;
+      position: relative;
+      transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.15s;
       font-family: inherit;
     }
     .rail-item svg {
@@ -81,13 +83,27 @@
       max-width: 100%;
     }
     .rail-item:hover, .rail-item:focus-visible {
-      background: #242434;
-      border-color: #ffffff;
+      background: #182a42;
+      border-color: #8ceaff;
+      color: #8ceaff;
+      transform: scale(1.04);
       outline: none;
     }
     .rail-item.active {
-      background: #28161c;
+      background: #281622;
+      border-color: rgba(229, 9, 20, 0.45);
       color: #ff4d57;
+    }
+    .rail-item.active::before {
+      content: "";
+      position: absolute;
+      left: 3px;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 3px;
+      height: 24px;
+      border-radius: 2px;
+      background: #e50914;
     }
     .rail-item.active span {
       font-weight: 700;
@@ -98,7 +114,100 @@
       height: 100vh;
       overflow-y: auto;
       overflow-x: hidden;
-      background: #0b0b0f;
+      background: linear-gradient(180deg, #080b14 0%, #0e1528 50%, #080b14 100%);
+    }
+
+    /* Disney+-style Brand / Genre Hub Cards */
+    .disney-hub-row {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding: 6px 24px 10px;
+      scrollbar-width: none;
+    }
+    .disney-hub-row::-webkit-scrollbar { display: none; }
+    .disney-hub-card {
+      flex: 0 0 156px;
+      height: 74px;
+      border-radius: 12px;
+      border: 1.5px solid rgba(255,255,255,0.22);
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      gap: 2px;
+      cursor: pointer;
+      color: #fff;
+      text-align: left;
+      transition: transform 0.16s, border-color 0.16s, box-shadow 0.16s;
+      font-family: inherit;
+    }
+    .disney-hub-card:hover, .disney-hub-card:focus-visible {
+      transform: scale(1.05);
+      border-color: #8ceaff;
+      box-shadow: 0 8px 22px rgba(0,0,0,0.45), 0 0 12px rgba(140,234,255,0.3);
+      outline: none;
+    }
+    .disney-hub-card.active {
+      border-color: #e50914;
+      box-shadow: 0 0 14px rgba(229,9,20,0.35);
+    }
+    .disney-hub-title {
+      font-size: 14px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      white-space: nowrap;
+    }
+    .disney-hub-sub {
+      font-size: 11px;
+      color: rgba(218, 228, 242, 0.85);
+      font-weight: 600;
+    }
+
+    /* Sub-category pills inside Live TV sections */
+    .subcat-row {
+      display: flex;
+      gap: 6px;
+      overflow-x: auto;
+      padding: 4px 0 6px;
+      scrollbar-width: none;
+    }
+    .subcat-row::-webkit-scrollbar { display: none; }
+    .subcat-pill {
+      flex: 0 0 auto;
+      background: #101826;
+      color: #bbd0e4;
+      border: 1px solid #233246;
+      padding: 5px 11px;
+      border-radius: 16px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.14s;
+      font-family: inherit;
+    }
+    .subcat-pill:hover, .subcat-pill:focus-visible {
+      border-color: #ffffff;
+      color: #8ceaff;
+      outline: none;
+    }
+    .subcat-pill.active {
+      background: #1a3a4a;
+      border-color: #8ceaff;
+      color: #8ceaff;
+    }
+    .flow-sub-tag {
+      background: #142030;
+      border: 1px solid rgba(140, 234, 255, 0.35);
+      color: #8ceaff;
+      font-size: 9px;
+      font-weight: 800;
+      padding: 1px 5px;
+      border-radius: 3px;
+      white-space: nowrap;
     }
 
     /* Brand & Hero Top Floating Bar (Matches APK HomeScreen) */
@@ -1402,6 +1511,7 @@
       allLiveChannels: [],
       liveLoadedFromApi: false,
       selectedLiveCat: "__ALL_MERGED__",
+      selectedLiveSubCat: "Todas",
       liveTab: 0,
       selectedLiveChannelId: null,
       liveSearch: "",
@@ -1952,6 +2062,7 @@
     async function loadLiveCategory(colId) {
       const cid = String(colId);
       state.selectedLiveCat = cid;
+      state.selectedLiveSubCat = "Todas";
       // Immediately update visible channels from local pool (works offline & on GitHub Pages!)
       if (state.allLiveChannels.length) {
         state.liveChannels = filterLiveLocal(cid, state.allLiveChannels);
@@ -2080,11 +2191,38 @@
       `;
     }
 
+    const WEB_HOME_HUBS = [
+      { id: "all", title: "Estrenos", sub: "Lo nuevo", emoji: "🔥", bg: "linear-gradient(135deg,#2b1018,#7a0d18)" },
+      { id: "series", title: "Series Top", sub: "Maratón", emoji: "📺", bg: "linear-gradient(135deg,#0e1d3b,#1a4680)" },
+      { id: "genre:Acción", title: "Acción", sub: "Adrenalina", emoji: "💥", bg: "linear-gradient(135deg,#2a180d,#7b3510)" },
+      { id: "genre:Comedia", title: "Comedia", sub: "Risas", emoji: "😂", bg: "linear-gradient(135deg,#1e220d,#5d6b14)" },
+      { id: "genre:Familia", title: "Familia", sub: "Disney & Kids", emoji: "✨", bg: "linear-gradient(135deg,#0d283a,#13688a)" },
+      { id: "genre:Ciencia ficción", title: "Sci-Fi", sub: "Mundos", emoji: "🚀", bg: "linear-gradient(135deg,#1d1038,#4f228c)" },
+      { id: "genre:Terror", title: "Terror", sub: "Suspenso", emoji: "👻", bg: "linear-gradient(135deg,#1f0e1f,#59143a)" },
+      { id: "live", title: "TV en Vivo", sub: "Guía HD", emoji: "📡", bg: "linear-gradient(135deg,#092a25,#0c6858)" }
+    ];
+
+    function onClickDisneyHub(hubId) {
+      if (hubId === "live") {
+        setSection("live");
+        return;
+      }
+      state.homeFilter = (state.homeFilter === hubId && hubId !== "all") ? "all" : hubId;
+      render();
+    }
+
     function renderHome() {
       let pool = [];
       if (state.homeFilter === "series") pool = [...state.series];
       else if (state.homeFilter === "movies") pool = [...state.movies];
       else if (state.homeFilter === "favs") pool = getFavorites();
+      else if (String(state.homeFilter || "").startsWith("genre:")) {
+        const gTarget = state.homeFilter.slice(6).toLowerCase();
+        pool = [...state.featured, ...state.movies, ...state.series].filter(it =>
+          (it.genres || []).some(g => g.toLowerCase() === gTarget) ||
+          String(it.row || "").toLowerCase().includes(gTarget)
+        );
+      }
       else pool = [...state.featured, ...state.movies, ...state.series];
 
       const unique = [];
@@ -2217,8 +2355,23 @@
         </div>
       `).join("");
 
+      const hubsHtml = `
+        <div class="disney-hub-row">
+          ${WEB_HOME_HUBS.map(h => {
+            const active = state.homeFilter === h.id && h.id !== "all";
+            return `
+              <button class="disney-hub-card ${active ? 'active' : ''}" style="background:${h.bg}" onclick="onClickDisneyHub('${escapeHtml(h.id)}')">
+                <div class="disney-hub-title"><span>${h.emoji}</span><span>${escapeHtml(h.title)}</span></div>
+                <div class="disney-hub-sub" style="${active ? 'color:#8ceaff;' : ''}">${active ? '● Activo' : escapeHtml(h.sub)}</div>
+              </button>
+            `;
+          }).join("")}
+        </div>
+      `;
+
       return `
         ${heroHtml}
+        ${hubsHtml}
         <div class="rows-container">
           ${continueHtml}
           ${top10Html}
@@ -2541,27 +2694,72 @@
       }
     }
 
+    const WEB_SUBCAT_ORDER = [
+      "Todas",
+      "Aire / Nacional",
+      "Noticias",
+      "Deportes",
+      "Cine y Series",
+      "Infantil",
+      "Documentales",
+      "Entretenimiento",
+      "Música y Radio",
+      "Regional / Interior"
+    ];
+
+    function classifyWebSubCategory(ch) {
+      const title = String((ch && (ch.name || ch.title)) || "").toLowerCase();
+      const cat = String((ch && ch.category) || "").toLowerCase();
+      const txt = title + " " + cat;
+      if (/deport|sport|espn|tyc|fox sport|tnt sport|dsports|directv sport|gol\b|futbol|fútbol|nba|nfl|ufc|boxeo|deportv|garag|garage|motor|dazn|win sport|beinsport|tudn/.test(txt)) return "Deportes";
+      if (/notic|news|todo noticias|\btn\b|c5n|a24|canal 26|cr[oó]nica|ln\+|la naci[oó]n|ip noticias|cnn|dw\b|bbc|euronews|france 24|rtve 24|telesur|infobae|24 horas|chacra|rural/.test(txt)) return "Noticias";
+      if (/infantil|kids|disney|cartoon|nickelodeon|\bnick\b|paka\s?paka|discovery kids|boomerang|toons|tooncast|anime|locomotion|baby\s?tv|cbeebies|clan|dreamworks|plim plim/.test(txt)) return "Infantil";
+      if (/cine|movie|film|hbo|cinemax|tnt\b|space\b|axn|warner|universal|star channel|sony|amc|paramount|tcm|golden|studio universal|cine\.ar|cinear|volver|europa|fx\b|syfy|series|novela|telenovela|pasiones|lifetime|hallmark|a&e|comedy central/.test(txt)) return "Cine y Series";
+      if (/document|cultura|ciencia|discovery|nat\s?geo|national geographic|history|encuentro|animal planet|tec\s?tv|tectv|odisea|smithsonian|h&h|home\s?&\s?health|tlc\b|el gourmet|food network|gourmet|investigaci[oó]n|\bid\b/.test(txt)) return "Documentales";
+      if (/m[uú]sic|radio|mtv|htv|vh1|quiero m[uú]sica|much\s?music|cm el canal|concert|fm\s?\d|am\s?\d|la 100|aspen|mega 98|vorterix|rock\s?&\s?pop|radio mitre|radio 10|continental|radio nacional|pop radio|radio rivadavia|urbana play|blue 100/.test(txt)) return "Música y Radio";
+      if (/\bel trece\b|\beltrece\b|\btelefe\b|\bam[eé]rica tv\b|\bam[eé]rica\b|\bel nueve\b|\bcanal 9\b|\btv p[uú]blica\b|\bnet tv\b|\bbravo tv\b|\bcanal de la ciudad\b|\bciudad magazine\b|\bmagazine\b|\bkzo\b/.test(title)) return "Aire / Nacional";
+      if (/entreten|show|variedad|reality|e!\b|e! entertainment|hgtv|glitz|hola tv|telemundo|univision|azteca|las estrellas|caracol|rcn|televen|canal 13|chilevisi[oó]n|mega\b/.test(txt)) return "Entretenimiento";
+      if (/argentina/.test(cat) || /canal \d|televisi[oó]n|tv\b|provincia|interior|mendoza|c[oó]rdoba|rosario|santa fe|tucum[aá]n|salta|jujuy|neuqu[eé]n|r[ií]o negro|chubut|misiones|corrientes|chaco|formosa|san juan|san luis|la pampa|catamarca|la rioja|santiago|tierra del fuego|mar del plata|bah[ií]a blanca|parana|paran[aá]|posadas|resistencia|bariloche|tandil|luj[aá]n|c5\b|c7\b|c9\b|c10\b|c12\b|c13\b/.test(txt)) return "Regional / Interior";
+      return "Aire / Nacional";
+    }
+
+    function shortSubCatTag(sc) {
+      const m = {
+        "Aire / Nacional": "AIRE",
+        "Noticias": "NOTICIAS",
+        "Deportes": "DEPORTES",
+        "Cine y Series": "CINE",
+        "Infantil": "INFANTIL",
+        "Documentales": "DOCU",
+        "Entretenimiento": "SHOW",
+        "Música y Radio": "MÚSICA",
+        "Regional / Interior": "REGIONAL"
+      };
+      return m[sc] || "TV";
+    }
+
     function renderLive() {
       const rawCats = state.liveCategories.length
         ? state.liveCategories
         : [
             { id: "__ALL_MERGED__", name: "Todos (Fusión)" },
-            { id: "__ARGENTINA__", name: "Argentina" },
+            { id: "__ARGENTINA__", name: "🇦🇷 Argentina" },
             { id: "__MARIANTV__", name: "MarianTV+ (Directo)" }
           ];
       const baseList = [];
       const seenCat = new Set();
       [
         { id: "__ALL_MERGED__", name: "Todos (Fusión)" },
-        { id: "__ARGENTINA__", name: "Argentina" },
+        { id: "__ARGENTINA__", name: "🇦🇷 Argentina" },
         { id: "__FAVS__", name: "♥ Favoritos" },
         { id: "__MARIANTV__", name: "MarianTV+ (Directo)" },
         ...rawCats
       ].forEach(c => {
         const cid = String(c.id);
-        if (!seenCat.has(cid)) {
+        const normName = String(c.name || "").trim().toLowerCase().replace(/^🇦🇷\s*/, "");
+        if (!seenCat.has(cid) && !(cid !== "__ARGENTINA__" && normName === "argentina")) {
           seenCat.add(cid);
-          baseList.push({ id: cid, name: cid === "__ARGENTINA__" ? "Argentina" : c.name });
+          baseList.push({ id: cid, name: cid === "__ARGENTINA__" ? "🇦🇷 Argentina" : c.name });
         }
       });
       const cats = baseList;
@@ -2571,10 +2769,22 @@
         ? state.liveChannels.filter(c => isLiveFav(c.channelCode || c.id))
         : state.liveChannels;
       const lockedNow = isAdultLockedNow();
-      const chs = baseChs.filter(c => {
-        if (lockedNow && isAdultChannel(c)) return false;
+      const safeBase = baseChs.filter(c => !(lockedNow && isAdultChannel(c)));
+      const subCounts = {};
+      safeBase.forEach(c => {
+        const sc = classifyWebSubCategory(c);
+        subCounts[sc] = (subCounts[sc] || 0) + 1;
+      });
+      const availSubCats = WEB_SUBCAT_ORDER.filter(sc => sc !== "Todas" && subCounts[sc] > 0).map(sc => [sc, subCounts[sc]]);
+      const activeSub = (state.selectedLiveSubCat && (state.selectedLiveSubCat === "Todas" || subCounts[state.selectedLiveSubCat] > 0))
+        ? state.selectedLiveSubCat
+        : "Todas";
+      const chs = safeBase.filter(c => {
+        if (activeSub !== "Todas" && classifyWebSubCategory(c) !== activeSub) return false;
         if (!q) return true;
-        return String(c.name || "").toLowerCase().includes(q) || String(c.index || c.number || "").includes(q);
+        return String(c.name || "").toLowerCase().includes(q) ||
+          String(c.index || c.number || "").includes(q) ||
+          classifyWebSubCategory(c).toLowerCase().includes(q);
       });
 
       const now = new Date();
@@ -2617,6 +2827,15 @@
             `;
             }).join("")}
           </div>
+
+          ${availSubCats.length >= 2 ? `
+            <div class="subcat-row">
+              <button class="subcat-pill ${activeSub==='Todas'?'active':''}" onclick="state.selectedLiveSubCat='Todas';render();">Todas (${safeBase.length})</button>
+              ${availSubCats.map(([sc, cnt]) => `
+                <button class="subcat-pill ${activeSub===sc?'active':''}" onclick="state.selectedLiveSubCat='${escapeHtml(sc)}';render();">${escapeHtml(sc)} (${cnt})</button>
+              `).join("")}
+            </div>
+          ` : ""}
 
           <div style="margin: 4px 0 10px;">
             <input
@@ -2682,6 +2901,7 @@
                       <div class="flow-row-title">
                         <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(name)}</span>
                         ${isHd ? `<span class="flow-hd-tag">${/fhd/i.test(name) ? "FHD" : "HD"}</span>` : ""}
+                        <span class="flow-sub-tag">${escapeHtml(shortSubCatTag(classifyWebSubCategory(ch)))}</span>
                       </div>
                       <div class="flow-epg-sub">${epg.range} • ${escapeHtml(epg.title)}</div>
                       <div class="flow-prog-bar"><div class="flow-prog-fill" style="width:${epg.pct}%"></div></div>

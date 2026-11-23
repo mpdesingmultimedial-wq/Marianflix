@@ -4338,7 +4338,9 @@
           activePlayer.hlsPlayer = hls;
           hls.loadSource(fullLiveUrl);
           hls.attachMedia(video);
+          let webReconnectTries = 0;
           hls.on(Hls.Events.MANIFEST_PARSED, () => {
+            webReconnectTries = 0;
             activePlayer.hlsLevels = Array.isArray(hls.levels) ? hls.levels : [];
             applyPreferredHlsQuality(hls);
             updateQualityButtonLabels();
@@ -4349,13 +4351,16 @@
             if (data && data.fatal) {
               if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
                 hls.recoverMediaError();
-              } else if (excluded.size < 3) {
-                excluded.add(String(code));
-                const backup = findWebBackupChannel(String(code), name, excluded);
-                if (backup) {
-                  showSeekToast("Respaldo: " + (backup.name || backup.title));
-                  startLivePlayback(backup.channelCode || backup.id, backup.name || backup.title, excluded);
+              } else if (webReconnectTries < 2) {
+                webReconnectTries += 1;
+                showSeekToast("Reconectando señal (" + webReconnectTries + "/2)...");
+                if (data.type === Hls.ErrorTypes.NETWORK_ERROR) {
+                  hls.startLoad();
+                } else {
+                  startLivePlayback(code, name);
                 }
+              } else {
+                showSeekToast("Señal interrumpida — tocá Recargar o cambiá de canal");
               }
             }
           });

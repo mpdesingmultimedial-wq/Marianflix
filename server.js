@@ -527,6 +527,67 @@ try {
     });
   }
 
+  // API: M3U Playlist Export for Roku / Smart TV M3U Players (e.g. M3U Playlist Player, IPTV Stream Player, Zapio)
+  if (pathname === "/api/playlist.m3u" || pathname === "/playlist.m3u" || pathname === "/api/argentina.m3u" || pathname === "/argentina.m3u") {
+    const onlyArg = pathname.includes("argentina") || String(parsed.query.country || "").toLowerCase() === "ar";
+    const classifyArgSub = (ch) => {
+      const t = String(ch.name || ch.title || "").toLowerCase();
+      const c = String(ch.category || "").toLowerCase();
+      const txt = t + " " + c;
+      if (/deport|sport|espn|tyc|fox sport|tnt sport|dsports|directv sport|futbol|fútbol|deportv|garag|motor/.test(txt)) return "Argentina - Deportes";
+      if (/notic|news|todo noticias|\btn\b|c5n|a24|canal 26|cr[oó]nica|ln\+|la naci[oó]n|ip noticias|cnn|infobae/.test(txt)) return "Argentina - Noticias";
+      if (/infantil|kids|disney|cartoon|nick|paka\s?paka|discovery kids|boomerang|toons|anime|plim plim/.test(txt)) return "Argentina - Infantil";
+      if (/cine|movie|film|hbo|tnt\b|space\b|axn|warner|universal|star channel|sony|amc|volver|cine\.ar|cinear|serie/.test(txt)) return "Argentina - Cine y Series";
+      if (/document|cultura|ciencia|discovery|nat\s?geo|history|encuentro|animal planet|tec\s?tv|el gourmet/.test(txt)) return "Argentina - Documentales";
+      if (/m[uú]sic|radio|mtv|htv|quiero|cm el canal|fm\s?\d|am\s?\d|vorterix|mitre|radio 10|aspen|la 100|urbana/.test(txt)) return "Argentina - Musica y Radio";
+      if (/\bel trece\b|\beltrece\b|\btelefe\b|\bam[eé]rica|\bel nueve\b|\bcanal 9\b|\btv p[uú]blica\b|\bnet tv\b|\bbravo tv\b|\bciudad\b|\bmagazine\b/.test(t)) return "Argentina - Aire y Nacional";
+      return "Argentina - Regional";
+    };
+    const argPriority = (ch) => {
+      const t = String(ch.name || ch.title || "").toLowerCase();
+      const keys = ["el trece", "eltrece", "telefe", "america", "américa", "el nueve", "canal 9", "tv publica", "tv pública", "tn ", "todo noticias", "a24", "c5n", "canal 26", "cronica", "crónica", "ln+", "net tv", "espn", "tnt sport", "tyc sport", "fox sport"];
+      for (let i = 0; i < keys.length; i++) {
+        if (t.includes(keys[i])) return i;
+      }
+      return 100;
+    };
+    const isAdultCh = (ch) => {
+      const txt = (String(ch.category || "") + " " + String(ch.name || ch.title || "")).toLowerCase();
+      if (txt.includes("adult swim") || txt.includes("venus media")) return false;
+      return /\b(xxx|porno?|playboy|penthouse|hustler|brazzers|sextreme|dorcel|adulto|\+18|18\+)\b/.test(txt);
+    };
+    const cleanAttr = (s) => String(s || "").replace(/["\r\n]/g, " ").trim();
+
+    let list = localTvPlusChannels.filter(c => c && c.streamUrl && /^https?:\/\//i.test(c.streamUrl) && !isAdultCh(c));
+    if (onlyArg) {
+      list = list.filter(c => String(c.category || "").toLowerCase() === "argentina");
+      list.sort((a, b) => argPriority(a) - argPriority(b));
+    } else {
+      const argChs = list.filter(c => String(c.category || "").toLowerCase() === "argentina").sort((a, b) => argPriority(a) - argPriority(b));
+      const restChs = list.filter(c => String(c.category || "").toLowerCase() !== "argentina");
+      list = [...argChs, ...restChs];
+    }
+
+    const lines = ["#EXTM3U"];
+    list.forEach((ch, idx) => {
+      const name = cleanAttr(ch.name || ch.title || `Canal ${idx + 1}`).replace(/,/g, " ");
+      const logo = cleanAttr(ch.logo || ch.poster || "");
+      const rawCat = String(ch.category || "TV en Vivo");
+      const group = rawCat.toLowerCase() === "argentina" ? classifyArgSub(ch) : cleanAttr(rawCat);
+      const id = cleanAttr(ch.id || `ch_${idx + 1}`);
+      lines.push(`#EXTINF:-1 tvg-id="${id}" tvg-name="${name}" tvg-logo="${logo}" group-title="${group}",${name}`);
+      lines.push(ch.streamUrl);
+    });
+    const body = lines.join("\n") + "\n";
+    res.writeHead(200, {
+      "Content-Type": "audio/x-mpegurl; charset=utf-8",
+      "Content-Disposition": `inline; filename="${onlyArg ? "marianflix_argentina.m3u" : "marianflix_tv.m3u"}"`,
+      "Access-Control-Allow-Origin": "*",
+      "Cache-Control": "public, max-age=300"
+    });
+    return res.end(body);
+  }
+
   // API: Live Channels by Category (merged Mariantv_plus + Marianflix Portal, never hangs!)
   if (pathname === "/api/live-channels") {
     const rawCol = String(parsed.query.columnId || "__ALL_MERGED__");

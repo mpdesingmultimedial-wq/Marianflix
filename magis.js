@@ -9,22 +9,25 @@ var crypto = require("crypto"),
   dnsx = require("./dnsx"),
   upstream = require("./upstream"),
   manualProxyUrl = "",
-  KEY_HEX = "e7af1ed7de1ffddd7bd3fe37ebdffde9ef3fe1ae39edfeb8",
+  KEY_HEX = "db5ddfdb869cff5e1beffe1cd37fdadb4f7fdfcdde69dd5b",
   HOSTS = [
-    "osuhk.m3x8o50te.com",
-    "oogoy.f30c96w8.com",
-    "hinumz.a878kkoyc.com",
+    "edastu.udigkkrc.com",
+    "brkhzs.udigkkrc.com",
+    "mptec.dhkrxuzcy.com",
     "ftmrmy.jdfey0cd.com",
     "fuxok.nguvmqhpk.com",
     "eajmnp.hcgv1dt8.com",
+    "hinumz.a878kkoyc.com",
     "krdwvd.swcaw7qx.com",
-    "mptec.dhkrxuzcy.com",
+    "osuhk.m3x8o50te.com",
+    "oogoy.f30c96w8.com",
   ],
   PORTAL_CODE = "masnew",
   APP_ID = "com.android.msandroid",
-  APK_VERSION = "49902",
-  SPKG_VER = "2025-08-07 05:40:11_36_16_",
-  APK_VER_HEADER = "43404",
+  APK_VERSION = "49920",
+  SPKG_VER = "2024-12-06 10:43:45_33_13_",
+  APK_VER_HEADER = "49920",
+  CLIENT_META_SALT = "213f24ac-14b7-4c03-a209-383ead1b014f",
   USER_AGENT = "okhttp/3.12.12",
   CONTENT_TYPE = "application/json;charset=utf-8",
   SNTOKEN_SALT = "ntFT65w6itH!lHCPw7D=@qnsFC5adD28",
@@ -36,6 +39,9 @@ var crypto = require("crypto"),
   TREE_TTL = 6e5,
   SEARCH_TTL = 18e4,
   SLB_TTL = 3e5,
+  SHARED_EMAIL = "kinoplayer@outlook.es",
+  SHARED_PASSWORD_SALT = "cloudstream",
+  SHARED_PASSWORD_RAW = "Cris2337677",
   SEED_URL =
     "https://raw.githubusercontent.com/cristianco7/XUPER-HYDRA-PORT-WEBOS/seeds/seeds.json",
   SEED_FILE = path.join(require("os").tmpdir(), "xuper-seeds.json"),
@@ -58,6 +64,7 @@ var crypto = require("crypto"),
     aaa100080: 1,
     aaa100082: 1,
     aaa100083: 1,
+    portal200001: 1,
   },
   SESSION_MAX_AGE_MS = 216e5,
   ROOT_CODES = {
@@ -87,7 +94,7 @@ var crypto = require("crypto"),
     reserve1: FIXED_RESERVE1,
     deviceToken: "",
     drmId: FIXED_DRM_ID,
-    sdkVer: 36,
+    sdkVer: 33,
   },
   FINGERPRINT_FIXED = {
     board: "goldfish_arm64",
@@ -376,8 +383,21 @@ function post(e, r, t) {
     });
     cReq.end();
   }
+  function makeTraceUuid() {
+    if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
+    var b = crypto.randomBytes(16);
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    var h = b.toString("hex");
+    return h.slice(0,8)+"-"+h.slice(8,12)+"-"+h.slice(12,16)+"-"+h.slice(16,20)+"-"+h.slice(20);
+  }
   function m(r, t, s) {
     var a = "http" === t,
+      traceId = makeTraceUuid(),
+      clientMeta = crypto
+        .createHash("md5")
+        .update(traceId + CLIENT_META_SALT)
+        .digest("hex"),
       u = {
         hostname: r,
         servername: r,
@@ -395,6 +415,8 @@ function post(e, r, t) {
           apk: APP_ID,
           apkVer: APK_VER_HEADER,
           spkgVer: SPKG_VER,
+          "X-Request-Trace": traceId,
+          "X-Client-Meta": clientMeta,
           "User-Agent": USER_AGENT,
           "Content-Type": CONTENT_TYPE,
           "Content-Length": Buffer.byteLength(n),
@@ -1139,24 +1161,68 @@ function ensureSession(e) {
         t[n](e, r);
       } catch (e) {}
   }
+  function loginSharedAccount(cb) {
+    cb = cb || function () {};
+    var passHash = crypto
+      .createHash("md5")
+      .update(SHARED_PASSWORD_RAW + SHARED_PASSWORD_SALT)
+      .digest("hex");
+    var bean = Object.assign(deviceDict(), {
+      accountType: "2",
+      userName: SHARED_EMAIL,
+      password: passHash,
+      type: "1",
+      macAddr: FIXED_MAC,
+      areaCode: "",
+      verificationCode: "",
+      verificationToken: "",
+      matadata: "",
+      signdata: "",
+      channel: "default",
+    });
+    post("v8/login", bean, function (err, res) {
+      if (err) return cb(err);
+      var uid = trim(res && res.userId),
+        tok = trim(res && res.userToken);
+      if (!uid || !tok) return cb(new Error("login sin credenciales"));
+      sessionActTries = 0;
+      session.userId = uid;
+      session.userToken = tok;
+      session.sn = trim((res && res.sn) || session.sn || "").toLowerCase();
+      session.ready = !0;
+      session.seed = null;
+      session.usesSeed = !1;
+      session.at = Date.now();
+      session.lastError = "";
+      saveStoredSession();
+      console.log("[magis] sesión iniciada con cuenta compartida v49920 (autónoma)");
+      cb(null, session);
+    });
+  }
   function a(e) {
     var r = {};
     e && (session.lastError = e.message || session.lastError);
-    (session.usesSeed && session.seed && (r[seedIdentity(session.seed)] = !0),
-      rescueSeed(r, function (r, t) {
+    session.usesSeed && session.seed && (r[seedIdentity(session.seed)] = !0);
+    loginSharedAccount(function (lErr, sSess) {
+      if (!lErr && sSess && sSess.userToken) {
+        sessionActTries = 0;
+        return s(null, session);
+      }
+      rescueSeed(r, function (r2, t) {
         if (!t)
           return (
             console.log("[magis] sin semilla utilizable: " + (e && e.message)),
             (sessionActTries = 0),
             s(e)
           );
-        (console.log(
+        console.log(
           "[magis] sesión por semilla " +
             seedIdentity(t).slice(0, 16) +
             " (bloqueo regional)"
-        ),
-          s(null, session));
-      }));
+        );
+        s(null, session);
+      });
+    });
   }
 }
 function itemFromAsset(e, r, t) {

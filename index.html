@@ -1514,6 +1514,7 @@
       selectedLiveSubCat: "Todas",
       liveTab: 0,
       selectedLiveChannelId: null,
+      liveCatSearch: "",
       liveSearch: "",
       selectedCategory: "Todas",
       selectedYear: "Todos",
@@ -2738,6 +2739,16 @@
       return m[sc] || "TV";
     }
 
+    function onLiveSearchInput(field, val, inputId) {
+      state[field] = val;
+      render();
+      const inp = document.getElementById(inputId);
+      if (inp) {
+        inp.focus();
+        try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+      }
+    }
+
     function renderLive() {
       const rawCats = state.liveCategories.length
         ? state.liveCategories
@@ -2763,6 +2774,8 @@
         }
       });
       const cats = baseList;
+      const catQ = String(state.liveCatSearch || "").trim().toLowerCase();
+      const visibleCats = catQ ? cats.filter(c => String(c.name || "").toLowerCase().includes(catQ)) : cats;
       const activeCat = cats.find(c => c.id === state.selectedLiveCat) || cats[0];
       const q = state.liveSearch.trim().toLowerCase();
       const baseChs = state.selectedLiveCat === "__FAVS__"
@@ -2817,7 +2830,7 @@
           </div>
 
           <div class="pills-row">
-            ${cats.map(c => {
+            ${visibleCats.map(c => {
               const adultCat = isAdultCategory(c.id, c.name);
               const prefix = adultCat ? (lockedNow ? "🔒 " : "🔓 ") : "";
               return `
@@ -2837,15 +2850,24 @@
             </div>
           ` : ""}
 
-          <div style="margin: 4px 0 10px;">
+          <div style="margin: 6px 0 10px; display:flex; gap:8px; flex-wrap:wrap;">
+            <input
+              type="text"
+              id="liveCatSearchInput"
+              class="search-input"
+              style="flex:0 1 230px;background:#0f1620;border-color:#263547;"
+              placeholder="🔍 Filtrar categorías (${visibleCats.length})..."
+              value="${escapeHtml(state.liveCatSearch || "")}"
+              oninput="onLiveSearchInput('liveCatSearch', this.value, 'liveCatSearchInput')"
+            />
             <input
               type="text"
               id="liveSearchInput"
               class="search-input"
-              style="background:#0f1620;border-color:#263547;"
-              placeholder="Buscar canal o número en ${escapeHtml(activeCat ? activeCat.name : 'En Vivo')} (${chs.length})..."
+              style="flex:1 1 260px;background:#0f1620;border-color:#263547;"
+              placeholder="🔍 Buscar dentro de ${escapeHtml(activeCat ? activeCat.name : 'En Vivo')}${activeSub !== 'Todas' ? ' • ' + escapeHtml(activeSub) : ''} (${chs.length})..."
               value="${escapeHtml(state.liveSearch)}"
-              oninput="state.liveSearch=this.value;render();"
+              oninput="onLiveSearchInput('liveSearch', this.value, 'liveSearchInput')"
             />
           </div>
 
@@ -3581,13 +3603,32 @@
     let webLiveDrawerStep = 0; // 0 = closed, 1 = channels, 2 = categories + channels
     let webLiveDrawerChIdx = 0;
     let webLiveDrawerCatIdx = 0;
+    let webDrawerCatQuery = "";
+    let webDrawerChQuery = "";
+    let webDrawerSubCat = "Todas";
 
-    function getWebLiveDrawerChannels() {
+    function getWebLiveDrawerBaseChannels() {
       const favs = getLiveFavs();
       const base = state.selectedLiveCat === "__FAVS__"
         ? (state.liveChannels || []).filter(c => favs.includes(String(c.channelCode || c.id)))
         : (state.liveChannels || []);
       return isAdultLockedNow() ? base.filter(c => !isAdultChannel(c)) : base;
+    }
+
+    function getWebLiveDrawerChannels() {
+      let list = getWebLiveDrawerBaseChannels();
+      if (webDrawerSubCat && webDrawerSubCat !== "Todas") {
+        list = list.filter(c => classifyWebSubCategory(c) === webDrawerSubCat);
+      }
+      const q = String(webDrawerChQuery || "").trim().toLowerCase();
+      if (q) {
+        list = list.filter(c =>
+          String(c.name || c.title || "").toLowerCase().includes(q) ||
+          String(c.number || c.index || "").includes(q) ||
+          classifyWebSubCategory(c).toLowerCase().includes(q)
+        );
+      }
+      return list;
     }
 
     function getWebLiveDrawerCategories() {
@@ -3596,7 +3637,19 @@
       if (raw.length) out.push(raw[0]);
       out.push({ id: "__FAVS__", name: "♥ Favoritos" });
       for (let i = 1; i < raw.length; i++) out.push(raw[i]);
-      return out;
+      const q = String(webDrawerCatQuery || "").trim().toLowerCase();
+      return q ? out.filter(c => String(c.name || "").toLowerCase().includes(q)) : out;
+    }
+
+    function onWebDrawerSearch(which, val) {
+      if (which === "cat") {
+        webDrawerCatQuery = val;
+        webLiveDrawerCatIdx = 0;
+      } else {
+        webDrawerChQuery = val;
+        webLiveDrawerChIdx = 0;
+      }
+      renderWebLiveDrawer(which === "cat" ? "ldCatSearch" : "ldChSearch");
     }
 
     function toggleWebLiveDrawer() {
@@ -3637,27 +3690,48 @@
       }
       if (cid === "__FAVS__") {
         state.selectedLiveCat = "__FAVS__";
+        webDrawerChQuery = "";
+        webDrawerSubCat = "Todas";
         setWebLiveDrawerStep(1);
       } else {
+        webDrawerChQuery = "";
+        webDrawerSubCat = "Todas";
         loadLiveCategory(cid).then(() => setWebLiveDrawerStep(1));
       }
     }
 
-    function renderWebLiveDrawer() {
+    function renderWebLiveDrawer(keepFocusId) {
       const el = document.getElementById("liveSideDrawer");
       if (!el || webLiveDrawerStep === 0) return;
       const cats = getWebLiveDrawerCategories();
+      const baseChs = getWebLiveDrawerBaseChannels();
       const chs = getWebLiveDrawerChannels();
-      const activeCatObj = cats.find(c => String(c.id) === String(state.selectedLiveCat));
-      const catTitle = (activeCatObj && activeCatObj.name) || "Canales";
+      const allCats = state.liveCategories || [];
+      const activeCatObj = allCats.find(c => String(c.id) === String(state.selectedLiveCat)) || cats.find(c => String(c.id) === String(state.selectedLiveCat));
+      const catTitle = (activeCatObj && activeCatObj.name) || (state.selectedLiveCat === "__FAVS__" ? "♥ Favoritos" : "Canales");
+
+      const subCounts = {};
+      baseChs.forEach(c => { const sc = classifyWebSubCategory(c); subCounts[sc] = (subCounts[sc] || 0) + 1; });
+      const availSubs = WEB_SUBCAT_ORDER.filter(sc => sc !== "Todas" && subCounts[sc] > 0).map(sc => [sc, subCounts[sc]]);
 
       let catsHtml = "";
       if (webLiveDrawerStep === 2) {
         catsHtml = `
           <div class="live-drawer-col live-drawer-cats" onclick="event.stopPropagation()">
             <div class="live-drawer-hdr">
-              <div class="live-drawer-title">Categorías</div>
+              <div class="live-drawer-title">Categorías (${cats.length})</div>
               <span style="color:#9eb0c2;font-size:11px;">► Canales</span>
+            </div>
+            <div style="padding:4px 8px 6px;">
+              <input
+                type="text"
+                id="ldCatSearch"
+                class="search-input"
+                style="padding:7px 10px;font-size:12px;background:#0a111b;border-color:#263547;"
+                placeholder="🔍 Buscar categoría..."
+                value="${escapeHtml(webDrawerCatQuery)}"
+                oninput="onWebDrawerSearch('cat', this.value)"
+              />
             </div>
             <div class="live-drawer-list" id="ldCatList">
               ${cats.map((c, idx) => {
@@ -3672,6 +3746,15 @@
         `;
       }
 
+      const subRowHtml = availSubs.length >= 2 ? `
+        <div class="subcat-row" style="padding:2px 10px 6px;">
+          <button class="subcat-pill ${webDrawerSubCat==='Todas'?'active':''}" onclick="webDrawerSubCat='Todas';webLiveDrawerChIdx=0;renderWebLiveDrawer();">Todas (${baseChs.length})</button>
+          ${availSubs.map(([sc, cnt]) => `
+            <button class="subcat-pill ${webDrawerSubCat===sc?'active':''}" onclick="webDrawerSubCat='${escapeHtml(sc)}';webLiveDrawerChIdx=0;renderWebLiveDrawer();">${escapeHtml(sc)} (${cnt})</button>
+          `).join("")}
+        </div>
+      ` : "";
+
       const chHtml = `
         <div class="live-drawer-col live-drawer-chans" onclick="event.stopPropagation()">
           <div class="live-drawer-hdr">
@@ -3679,6 +3762,18 @@
             ${webLiveDrawerStep === 1 ? `<button class="flow-pill" style="padding:4px 10px;font-size:11px;" onclick="setWebLiveDrawerStep(2)">◄ Categorías</button>` : ""}
           </div>
           <div class="live-drawer-hint">${webLiveDrawerStep === 1 ? "◄ Categorías • ▲/▼ Elegir • Enter Ver • ► Cerrar" : "► Volver a canales • Enter Elegir categoría"}</div>
+          <div style="padding:4px 10px 4px;">
+            <input
+              type="text"
+              id="ldChSearch"
+              class="search-input"
+              style="padding:7px 10px;font-size:12px;background:#0a111b;border-color:#263547;"
+              placeholder="🔍 Buscar dentro de ${escapeHtml(catTitle)}..."
+              value="${escapeHtml(webDrawerChQuery)}"
+              oninput="onWebDrawerSearch('ch', this.value)"
+            />
+          </div>
+          ${subRowHtml}
           <div class="live-drawer-list" id="ldChList">
             ${chs.length ? chs.map((ch, idx) => {
               const code = String(ch.channelCode || ch.id);
@@ -3692,17 +3787,25 @@
                   <span class="ld-num">${escapeHtml(num)}</span>
                   <div style="flex:1;min-width:0;">
                     <div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtml(name)}</div>
-                    <div class="ld-sub">${isAct ? "● EN VIVO AHORA" : escapeHtml(ch.category || catTitle)}</div>
+                    <div class="ld-sub">${isAct ? "● EN VIVO AHORA" : escapeHtml(classifyWebSubCategory(ch))}</div>
                   </div>
                   ${isFavStar}
                 </button>
               `;
-            }).join("") : `<div style="color:#9eb0c2;padding:24px 8px;text-align:center;">Sin canales en esta categoría.</div>`}
+            }).join("") : `<div style="color:#9eb0c2;padding:24px 8px;text-align:center;">Sin canales que coincidan.</div>`}
           </div>
         </div>
       `;
 
       el.innerHTML = catsHtml + chHtml;
+      if (keepFocusId) {
+        const inp = document.getElementById(keepFocusId);
+        if (inp) {
+          inp.focus();
+          try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (_) {}
+          return;
+        }
+      }
       const focusedBtn = el.querySelector(".live-drawer-item.focused");
       if (focusedBtn && focusedBtn.scrollIntoView) {
         focusedBtn.scrollIntoView({ block: "nearest" });
@@ -3767,6 +3870,14 @@
       if (pinModal && pinModal.classList.contains("open")) return;
       const modal = document.getElementById("playerModal");
       if (!modal || !modal.classList.contains("open")) return;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === "INPUT" || ae.tagName === "TEXTAREA")) {
+        if (ev.key === "Escape") {
+          ev.preventDefault();
+          ae.blur();
+        }
+        return;
+      }
       if (activePlayer.isLive) {
         if (ev.key === "ArrowLeft") {
           ev.preventDefault();
